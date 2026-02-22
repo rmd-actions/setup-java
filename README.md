@@ -78,28 +78,28 @@ For information about the latest releases, recent updates, and newly supported d
 #### Eclipse Temurin
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin' # See 'Supported distributions' for available options
-    java-version: '21'
+    java-version: '25'
 - run: java HelloWorldApp.java
 ```
 
 #### Azul Zulu OpenJDK
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'zulu' # See 'Supported distributions' for available options
-    java-version: '21'
+    java-version: '25'
 - run: java HelloWorldApp.java
 ```
 
 #### Supported version syntax
 The `java-version` input supports an exact version or a version range using [SemVer](https://semver.org/) notation:
-- major versions: `8`, `11`, `16`, `17`, `21`
+- major versions: `8`, `11`, `16`, `17`, `21`, `25`
 - more specific versions: `8.0.282+8`, `8.0.232`, `11.0`, `11.0.4`, `17.0`
 - early access (EA) versions: `15-ea`, `15.0.0-ea`
 
@@ -145,26 +145,31 @@ The cache input is optional, and caching is turned off by default.
 #### Caching gradle dependencies
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin'
-    java-version: '21'
+    java-version: '25'
     cache: 'gradle'
     cache-dependency-path: | # optional
       sub-project/*.gradle*
       sub-project/**/gradle-wrapper.properties
 - run: ./gradlew build --no-daemon
 ```
+Using the `cache: gradle` provides a simple and effective way to cache Gradle dependencies with minimal configuration.
+
+For projects that require more advanced `Gradle` caching features, such as caching build outputs, support for Gradle configuration cache, encrypted cache storage, fine-grained cache control (including options to enable or disable the cache, set it to read-only or write-only, perform automated cleanup, and define custom cache rules), or optimized performance for complex CI workflows, consider using [`gradle/actions/setup-gradle`](https://github.com/gradle/actions/tree/main/setup-gradle).  
+
+For setup details and a comprehensive overview of all available features, visit the [setup-gradle documentation](https://github.com/gradle/actions/blob/main/docs/setup-gradle.md).
 
 #### Caching maven dependencies
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin'
-    java-version: '21'
+    java-version: '25'
     cache: 'maven'
     cache-dependency-path: 'sub-project/pom.xml' # optional
 - name: Build with Maven
@@ -174,11 +179,11 @@ steps:
 #### Caching sbt dependencies
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin'
-    java-version: '21'
+    java-version: '25'
     cache: 'sbt'
     cache-dependency-path: | # optional
       sub-project/build.sbt
@@ -194,11 +199,11 @@ Usually, cache gets downloaded in multiple segments of fixed sizes. Sometimes, a
 env:
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: '5'
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin'
-    java-version: '21'
+    java-version: '25'
     cache: 'gradle'
 - run: ./gradlew build --no-daemon
 ```
@@ -214,11 +219,11 @@ For Java distributions that are not cached on Hosted images, `check-latest` alwa
 
 ```yaml
 steps:
-- uses: actions/checkout@v5
+- uses: actions/checkout@v6
 - uses: actions/setup-java@v5
   with:
     distribution: 'temurin'
-    java-version: '21'
+    java-version: '25'
     check-latest: true
 - run: java HelloWorldApp.java
 ```
@@ -230,10 +235,10 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        java: [ '8', '11', '17', '21' ]
+        java: [ '8', '11', '17', '21', '25' ]
     name: Java ${{ matrix.Java }} sample
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup java
         uses: actions/setup-java@v5
         with:
