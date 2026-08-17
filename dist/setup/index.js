@@ -77727,6 +77727,7 @@ function generate(id, username, password, gpgPassphrase) {
             '@xmlns': 'http://maven.apache.org/SETTINGS/1.0.0',
             '@xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
             '@xsi:schemaLocation': 'http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd',
+            interactiveMode: false,
             servers: {
                 server: [
                     {
@@ -78000,7 +78001,7 @@ function isProbablyGradleDaemonProblem(packageManager, error) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DISTRIBUTIONS_ONLY_MAJOR_VERSION = exports.INPUT_MVN_TOOLCHAIN_VENDOR = exports.INPUT_MVN_TOOLCHAIN_ID = exports.MVN_TOOLCHAINS_FILE = exports.MVN_SETTINGS_FILE = exports.M2_DIR = exports.STATE_GPG_PRIVATE_KEY_FINGERPRINT = exports.INPUT_JOB_STATUS = exports.INPUT_CACHE_DEPENDENCY_PATH = exports.INPUT_CACHE = exports.INPUT_DEFAULT_GPG_PASSPHRASE = exports.INPUT_DEFAULT_GPG_PRIVATE_KEY = exports.INPUT_GPG_PASSPHRASE = exports.INPUT_GPG_PRIVATE_KEY = exports.INPUT_OVERWRITE_SETTINGS = exports.INPUT_SETTINGS_PATH = exports.INPUT_SERVER_PASSWORD = exports.INPUT_SERVER_USERNAME = exports.INPUT_SERVER_ID = exports.INPUT_CHECK_LATEST = exports.INPUT_JDK_FILE = exports.INPUT_DISTRIBUTION = exports.INPUT_JAVA_PACKAGE = exports.INPUT_ARCHITECTURE = exports.INPUT_JAVA_VERSION_FILE = exports.INPUT_JAVA_VERSION = exports.MACOS_JAVA_CONTENT_POSTFIX = void 0;
+exports.DISTRIBUTIONS_ONLY_MAJOR_VERSION = exports.MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG = exports.MAVEN_NO_TRANSFER_PROGRESS_FLAG = exports.MAVEN_ARGS_ENV = exports.INPUT_SHOW_DOWNLOAD_PROGRESS = exports.INPUT_MVN_TOOLCHAIN_VENDOR = exports.INPUT_MVN_TOOLCHAIN_ID = exports.MVN_TOOLCHAINS_FILE = exports.MVN_SETTINGS_FILE = exports.M2_DIR = exports.STATE_GPG_PRIVATE_KEY_FINGERPRINT = exports.INPUT_JOB_STATUS = exports.INPUT_CACHE_DEPENDENCY_PATH = exports.INPUT_CACHE = exports.INPUT_DEFAULT_GPG_PASSPHRASE = exports.INPUT_DEFAULT_GPG_PRIVATE_KEY = exports.INPUT_GPG_PASSPHRASE = exports.INPUT_GPG_PRIVATE_KEY = exports.INPUT_OVERWRITE_SETTINGS = exports.INPUT_SETTINGS_PATH = exports.INPUT_SERVER_PASSWORD = exports.INPUT_SERVER_USERNAME = exports.INPUT_SERVER_ID = exports.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = exports.INPUT_VERIFY_SIGNATURE = exports.INPUT_CHECK_LATEST = exports.INPUT_JDK_FILE = exports.INPUT_DISTRIBUTION = exports.INPUT_JAVA_PACKAGE = exports.INPUT_ARCHITECTURE = exports.INPUT_JAVA_VERSION_FILE = exports.INPUT_JAVA_VERSION = exports.MACOS_JAVA_CONTENT_POSTFIX = void 0;
 exports.MACOS_JAVA_CONTENT_POSTFIX = 'Contents/Home';
 exports.INPUT_JAVA_VERSION = 'java-version';
 exports.INPUT_JAVA_VERSION_FILE = 'java-version-file';
@@ -78009,6 +78010,8 @@ exports.INPUT_JAVA_PACKAGE = 'java-package';
 exports.INPUT_DISTRIBUTION = 'distribution';
 exports.INPUT_JDK_FILE = 'jdkFile';
 exports.INPUT_CHECK_LATEST = 'check-latest';
+exports.INPUT_VERIFY_SIGNATURE = 'verify-signature';
+exports.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = 'verify-signature-public-key';
 exports.INPUT_SERVER_ID = 'server-id';
 exports.INPUT_SERVER_USERNAME = 'server-username';
 exports.INPUT_SERVER_PASSWORD = 'server-password';
@@ -78027,6 +78030,10 @@ exports.MVN_SETTINGS_FILE = 'settings.xml';
 exports.MVN_TOOLCHAINS_FILE = 'toolchains.xml';
 exports.INPUT_MVN_TOOLCHAIN_ID = 'mvn-toolchain-id';
 exports.INPUT_MVN_TOOLCHAIN_VENDOR = 'mvn-toolchain-vendor';
+exports.INPUT_SHOW_DOWNLOAD_PROGRESS = 'show-download-progress';
+exports.MAVEN_ARGS_ENV = 'MAVEN_ARGS';
+exports.MAVEN_NO_TRANSFER_PROGRESS_FLAG = '-ntp';
+exports.MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG = '--no-transfer-progress';
 exports.DISTRIBUTIONS_ONLY_MAJOR_VERSION = ['corretto'];
 
 
@@ -78308,6 +78315,7 @@ const constants_1 = __nccwpck_require__(27242);
 const os_1 = __importDefault(__nccwpck_require__(70857));
 class JavaBase {
     constructor(distribution, installerOptions) {
+        var _a;
         this.distribution = distribution;
         this.http = new httpm.HttpClient('actions/setup-java', undefined, {
             allowRetries: true,
@@ -78317,10 +78325,15 @@ class JavaBase {
         this.architecture = installerOptions.architecture || os_1.default.arch();
         this.packageType = installerOptions.packageType;
         this.checkLatest = installerOptions.checkLatest;
+        this.verifySignature = (_a = installerOptions.verifySignature) !== null && _a !== void 0 ? _a : false;
+        this.verifySignaturePublicKey = installerOptions.verifySignaturePublicKey;
     }
     setupJava() {
         var _a, _b;
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.verifySignature && !this.supportsSignatureVerification()) {
+                throw new Error(`Input 'verify-signature' is not supported for distribution '${this.distribution}'.`);
+            }
             let foundJava = this.findInToolcache();
             if (foundJava && !this.checkLatest) {
                 core.info(`Resolved Java ${foundJava.version} from tool-cache`);
@@ -78439,6 +78452,9 @@ class JavaBase {
     }
     get toolcacheFolderName() {
         return `Java_${this.distribution}_${this.packageType}`;
+    }
+    supportsSignatureVerification() {
+        return false;
     }
     getToolcacheVersionName(version) {
         if (!this.stable) {
@@ -79912,21 +79928,38 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MicrosoftDistributions = void 0;
+exports.MicrosoftDistributions = exports.MICROSOFT_PUBLIC_KEY = void 0;
 const base_installer_1 = __nccwpck_require__(79935);
 const util_1 = __nccwpck_require__(54527);
+const gpg = __importStar(__nccwpck_require__(88343));
+const microsoft_key_1 = __nccwpck_require__(56286);
 const core = __importStar(__nccwpck_require__(37484));
 const tc = __importStar(__nccwpck_require__(33472));
 const fs_1 = __importDefault(__nccwpck_require__(79896));
 const path_1 = __importDefault(__nccwpck_require__(16928));
+var microsoft_key_2 = __nccwpck_require__(56286);
+Object.defineProperty(exports, "MICROSOFT_PUBLIC_KEY", ({ enumerable: true, get: function () { return microsoft_key_2.MICROSOFT_PUBLIC_KEY; } }));
 class MicrosoftDistributions extends base_installer_1.JavaBase {
     constructor(installerOptions) {
         super('Microsoft', installerOptions);
     }
     downloadTool(javaRelease) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            if (this.verifySignature) {
+                if (!javaRelease.signatureUrl) {
+                    throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Microsoft Build of OpenJDK version ${javaRelease.version}.`);
+                }
+                core.info(`Verifying Java package signature...`);
+                try {
+                    yield gpg.verifyPackageSignature(javaArchivePath, javaRelease.signatureUrl, (_a = this.verifySignaturePublicKey) !== null && _a !== void 0 ? _a : microsoft_key_1.MICROSOFT_PUBLIC_KEY);
+                }
+                catch (error) {
+                    throw new Error(`Failed to verify signature for Microsoft Build of OpenJDK version ${javaRelease.version}. Signature URL: ${javaRelease.signatureUrl}. Error: ${error.message}`);
+                }
+            }
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -79940,6 +79973,7 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
         });
     }
     findPackageForDownload(range) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const arch = this.distributionArchitecture();
             if (arch !== 'x64' && arch !== 'aarch64') {
@@ -79960,11 +79994,17 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
                 const availableVersionStrings = manifest.map(item => item.version);
                 throw this.createVersionNotFoundError(range, availableVersionStrings);
             }
+            const file = foundRelease.files[0];
+            const signatureUrl = (_a = file.signature_url) !== null && _a !== void 0 ? _a : `${file.download_url}.sig`;
             return {
-                url: foundRelease.files[0].download_url,
+                url: file.download_url,
+                signatureUrl,
                 version: foundRelease.version
             };
         });
+    }
+    supportsSignatureVerification() {
+        return true;
     }
     getAvailableVersions() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -80006,6 +80046,38 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
     }
 }
 exports.MicrosoftDistributions = MicrosoftDistributions;
+
+
+/***/ }),
+
+/***/ 56286:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MICROSOFT_PUBLIC_KEY = void 0;
+// Microsoft Build of OpenJDK GPG signing key
+// Retrieved from: https://download.visualstudio.microsoft.com/download/pr/b90071e2-e0cf-4411-98be-dbeb09d67bf0/8622862bcd54206e158c5abca0582c9b/464279_464280_aoc_20210208.asc
+exports.MICROSOFT_PUBLIC_KEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+Version: BSN Pgp v1.1.0.0
+
+mQENBGAhlWcBCADCQjj6huLTenvZSLej35e9YKEHm4lix2uvPOONexMaU8V2v7KL
+RGdoXF7jwHci7efnPZ+9zpS2+g3rhvv8M7yWy9E/1psEtGzvmp1IL/qIabMEQqi+
+UlhPGh7MQ/BkXAlic8Dyl3XYqr0EXS11iCiTr6Zkxs9Ee4V54gxL4gogRn4wk9sl
+/nrjgDzMsUwla0pynoQQvYpqCdiAr3gKKllT1skCDqgVOMMyZxsx9HjZxg/3AJz6
+r5i512L2R+3Hkv+XmxT+mnGBCFcny0DM7PjNXEmIK3ZSkro1tQML90zx3Fyh5esx
+fpVvuIXGFV75o35VVCBZoiD3hcfOnIJsPQ9nABEBAAG0OE1pY3Jvc29mdCBKYXZh
+IEVuZ2luZWVyaW5nIDxqYXZhcGxhdGluZnJhQG1pY3Jvc29mdC5jb20+iQE4BBMB
+CAAiBQJgIZVnAhsDBgsJCAcDAgYVCAIJCgsEFgIDAQIeAQIXgAAKCRA1Ux0xWyHB
+icwTCACJO2FGNocNvdUtAb+eDKuGwt0chAJdCES2ZtgBScwrwDyWpxpRznoXWBHL
+MJeLyxJoKsCG3vVlY4uh48psCzVm3OKvi7MCPT955t8W6TzfSBxTpjR8zRgJkjPJ
+EGhHTlusUfz7TtM5etJF0qscSJH1grcNsgtee97mk4QyEzT8Di83NQmYxKcBrliq
+yK/SWWt8VkTyYAEO6L5PoB4L9r8ka27uQs+jgCw+/Z0JMtNmmhyNGY3+a1YtPeoy
+JdQaI9LphfKGbVaz6SK2aol7vj+c2TG3TLUYdOYGMH1OZlri2GTkCVjwna2GC7p4
+Fa133tP85xzJEq1XeXm8WeLFo2wV
+=rHCS
+-----END PGP PUBLIC KEY BLOCK-----`;
 
 
 /***/ }),
@@ -80560,6 +80632,50 @@ exports.SemeruDistribution = SemeruDistribution;
 
 /***/ }),
 
+/***/ 80877:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ADOPTIUM_PUBLIC_KEY = void 0;
+// Adoptium GPG signing key (fingerprint: 3B04D753C9050D9A5D343F39843C48A565F8F04B)
+// Retrieved from: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3B04D753C9050D9A5D343F39843C48A565F8F04B
+exports.ADOPTIUM_PUBLIC_KEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+xsBNBGGTvTQBCAC6ey144n7CG8foafF6mwgIBN1fIm1ILZDuGS4tMr0/XI8pgJnT
+QvsPxZWEvtSm7bEMObzEoZJcXwjBcJl1B0ui8k5kHMTI75gCmZPsoKLFWIEpuRBQ
+PBocusw80apDmLnNDQLVQvDFtEua5gaNa/fRw9YsmBoXBqvgrjFUIdGyWoQvH5+a
+9OYlWD9n5VV0gnVMb+aclwVzB/zJw3kHGSgzuMtlAHeQiah7Y8yomQn/UIX8yqDf
++11sP3+c87YcjkRqImRTtmKEDcEtGPAIXC6SYA+uEEkbYE0Fy0chkvtnVWJ597fa
+Epai4rnICU8zoJ6X5z3v1aM2WerhX9oq9X8PABEBAAHNQEFkb3B0aXVtIEdQRyBL
+ZXkgKERFQi9SUE0gU2lnbmluZyBLZXkpIDx0ZW11cmluLWRldkBlY2xpcHNlLm9y
+Zz7CwJIEEwEIADwWIQQ7BNdTyQUNml00PzmEPEilZfjwSwUCYZO9NAIbAwULCQgH
+AgMiAgEGFQoJCAsCBBYCAwECHgcCF4AACgkQhDxIpWX48Et4AggAjjJzYWuKV3nG
+7ngInngl8G/m9JoHr7BmwgcQXYhdy5hVkMcUx5JLeXz2LMBUH/F2nD595hgjMabk
+kVib20X8lq9RsNbdfc2hBcWU6qyHKxsIqT4boI2/XDyEzzMyyZWWNGo/27Ci7Xmj
+pWu31nh0pDdPqdyWDIKojbVVnxlCRY8as8Sm+1ufi709KCi4MuwHNsUlCSwb/fju
+NKeHkrHbLcHKUUIEcmTSKRWrpMYBzm1HYOGBz4xPuELwUfUp71ehfoyBZlp6RDRf
+l5TYI1FmCyHuvjNhrJgWv7bOTcf8yObGY+TEUhzc4xQqCrF4ur9d3opvsuPBQsv+
+Klqi5KSZgs7ATQRhk700AQgAq14okly8cFrpYVenEQPiB75AUZfKRpMduiR6IxAj
+SKcH7aSoFZ9AubUEBVpZsyT5svxoEPe1i4TdbF+m9FGy42EcOlLa3ArLTj5H8FRl
+UdGZB9I5mk4GptOzPM+aHMMu92vW/ZwjuS8DvOiQSp+cUmG1EqOMJSM7e/4BM71z
+E+OKaVJCj79pEzhG3SK/IC/OlxxyETT66NSfYJd7Sw5R6Vr19am/uNU690W0CJ+q
+VQeFpmDMr7LnfdFRIh+lJe05+PvWXeidkGjox5cbG52wf8aRIR/FgkfcFvqRMN1f
+B+dVOWueloUeVAnzcUznOKmUEs7LP9ObJhYHHgup4IAU2wARAQABwsB2BBgBCAAg
+FiEEOwTXU8kFDZpdND85hDxIpWX48EsFAmGTvTQCGwwACgkQhDxIpWX48EvXHQf/
+Q0nZsGDXnZHiBoojeSdpkO7WBjMIP3w1GdLvRpPQrS8TfOPbZuoevzCNh38Y3gwF
+yelJspvzDQrBXhgkzAGlucYg8Y7KHa5Ebm7iDgMzc37L1hYSZTYCqwd7aowfgy34
+hOk3B67LffkJpIh738Oa9CtlwxQ9xcytmBmQ1fBBOwm/9IhAwHPQuydYIs4DxWbj
+0MGSP4fDntU7e4UjsHNmhudDcYol0FaqdHHIIB9C/G4CzetRwHFOn3b4JwXMU7YU
+6aJA3mXhi3hggMC3wkT2HHZ/TquuOdNc02fypWOCDOHz0alBBJNqoVUNFNqU3tfJ
+wI4qF/KKq9BfyfucAs0ykA==
+=XLag
+-----END PGP PUBLIC KEY BLOCK-----`;
+
+
+/***/ }),
+
 /***/ 91986:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -80601,14 +80717,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.TemurinDistribution = exports.TemurinImplementation = void 0;
+exports.TemurinDistribution = exports.TemurinImplementation = exports.ADOPTIUM_PUBLIC_KEY = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const tc = __importStar(__nccwpck_require__(33472));
 const fs_1 = __importDefault(__nccwpck_require__(79896));
 const path_1 = __importDefault(__nccwpck_require__(16928));
 const semver_1 = __importDefault(__nccwpck_require__(62088));
+const gpg = __importStar(__nccwpck_require__(88343));
+const adoptium_key_1 = __nccwpck_require__(80877);
 const base_installer_1 = __nccwpck_require__(79935);
 const util_1 = __nccwpck_require__(54527);
+var adoptium_key_2 = __nccwpck_require__(80877);
+Object.defineProperty(exports, "ADOPTIUM_PUBLIC_KEY", ({ enumerable: true, get: function () { return adoptium_key_2.ADOPTIUM_PUBLIC_KEY; } }));
 var TemurinImplementation;
 (function (TemurinImplementation) {
     TemurinImplementation["Hotspot"] = "Hotspot";
@@ -80633,7 +80753,8 @@ class TemurinDistribution extends base_installer_1.JavaBase {
                     : item.version_data.semver.replace('-beta+', '+');
                 return {
                     version: formattedVersion,
-                    url: item.binaries[0].package.link
+                    url: item.binaries[0].package.link,
+                    signatureUrl: item.binaries[0].package.signature_link
                 };
             });
             const satisfiedVersions = availableVersionsWithBinaries
@@ -80650,9 +80771,22 @@ class TemurinDistribution extends base_installer_1.JavaBase {
         });
     }
     downloadTool(javaRelease) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            if (this.verifySignature) {
+                if (!javaRelease.signatureUrl) {
+                    throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${javaRelease.version}.`);
+                }
+                core.info(`Verifying Java package signature...`);
+                try {
+                    yield gpg.verifyPackageSignature(javaArchivePath, javaRelease.signatureUrl, (_a = this.verifySignaturePublicKey) !== null && _a !== void 0 ? _a : adoptium_key_1.ADOPTIUM_PUBLIC_KEY);
+                }
+                catch (error) {
+                    throw new Error(`Failed to verify signature for Temurin version ${javaRelease.version} from ${javaRelease.signatureUrl}: ${error.message}`);
+                }
+            }
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -80668,6 +80802,9 @@ class TemurinDistribution extends base_installer_1.JavaBase {
     }
     get toolcacheFolderName() {
         return super.toolcacheFolderName;
+    }
+    supportsSignatureVerification() {
+        return true;
     }
     getAvailableVersions() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -80961,14 +81098,27 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.deleteKey = exports.importKey = exports.PRIVATE_KEY_FILE = void 0;
+exports.verifyPackageSignature = exports.deleteKey = exports.importKey = exports.toGpgPath = exports.PRIVATE_KEY_FILE = void 0;
 const fs = __importStar(__nccwpck_require__(79896));
 const path = __importStar(__nccwpck_require__(16928));
 const io = __importStar(__nccwpck_require__(94994));
 const exec = __importStar(__nccwpck_require__(95236));
+const tc = __importStar(__nccwpck_require__(33472));
 const util = __importStar(__nccwpck_require__(54527));
 exports.PRIVATE_KEY_FILE = path.join(util.getTempDir(), 'private-key.asc');
 const PRIVATE_KEY_FINGERPRINT_REGEX = /\w{40}/;
+// Convert a Windows path (D:\a\_temp\...) to a POSIX path (/d/a/_temp/...).
+// The Git-bundled GPG on Windows (MSYS2-based) uses POSIX path conventions
+// internally. Passing Windows paths with backslashes can cause fatal GPG errors
+// (exit code 2), so all paths passed to GPG must be in POSIX format on Windows.
+function toGpgPath(p) {
+    if (process.platform !== 'win32')
+        return p;
+    return p
+        .replace(/\\/g, '/')
+        .replace(/^([A-Za-z]):\//, (_, drive) => `/${drive.toLowerCase()}/`);
+}
+exports.toGpgPath = toGpgPath;
 function importKey(privateKey) {
     return __awaiter(this, void 0, void 0, function* () {
         fs.writeFileSync(exports.PRIVATE_KEY_FILE, privateKey, {
@@ -81005,6 +81155,130 @@ function deleteKey(keyFingerprint) {
     });
 }
 exports.deleteKey = deleteKey;
+function verifyPackageSignature(archivePath, signatureUrl, publicKeyContent) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const signaturePath = yield tc.downloadTool(signatureUrl);
+        let gpgHome;
+        try {
+            gpgHome = fs.mkdtempSync(path.join(util.getTempDir(), 'verify-signature-gpg-home-'));
+        }
+        catch (error) {
+            try {
+                yield io.rmRF(signaturePath);
+            }
+            catch (_a) {
+                // ignore cleanup failures
+            }
+            throw new Error(`Failed to create temporary GPG home directory for signature verification: ${error.message}`);
+        }
+        try {
+            const publicKeyFile = path.join(gpgHome, 'public-key.asc');
+            fs.writeFileSync(publicKeyFile, publicKeyContent, { encoding: 'utf-8' });
+            const options = { silent: true };
+            yield exec.exec('gpg', [
+                '--homedir',
+                toGpgPath(gpgHome),
+                '--batch',
+                '--import',
+                toGpgPath(publicKeyFile)
+            ], options);
+            yield exec.exec('gpg', [
+                '--homedir',
+                toGpgPath(gpgHome),
+                '--batch',
+                '--verify',
+                toGpgPath(signaturePath),
+                toGpgPath(archivePath)
+            ], options);
+        }
+        finally {
+            yield io.rmRF(signaturePath);
+            yield io.rmRF(gpgHome);
+        }
+    });
+}
+exports.verifyPackageSignature = verifyPackageSignature;
+
+
+/***/ }),
+
+/***/ 38172:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.configureMavenArgs = void 0;
+const core = __importStar(__nccwpck_require__(37484));
+const util_1 = __nccwpck_require__(54527);
+const constants_1 = __nccwpck_require__(27242);
+/**
+ * Configures the MAVEN_ARGS environment variable so that Maven suppresses
+ * artifact transfer/download progress output by default, producing cleaner
+ * CI logs.
+ *
+ * Behavior:
+ * - When `show-download-progress` is `false` (the default), `-ntp`
+ *   (`--no-transfer-progress`) is appended to any existing MAVEN_ARGS value.
+ * - When `show-download-progress` is `true`, MAVEN_ARGS is left untouched so
+ *   the user's own configuration (and Maven's default progress output) is
+ *   preserved.
+ *
+ * The change is idempotent: if MAVEN_ARGS already disables transfer progress
+ * (via `-ntp` or `--no-transfer-progress`) nothing is added. Any pre-existing
+ * MAVEN_ARGS value is preserved.
+ *
+ * MAVEN_ARGS is honored by Maven 3.9.0+ and the Maven Wrapper; older Maven
+ * versions ignore it, so this is a no-op there. It has no effect on non-Maven
+ * builds such as Gradle or sbt.
+ */
+function configureMavenArgs() {
+    var _a;
+    const showDownloadProgress = (0, util_1.getBooleanInput)(constants_1.INPUT_SHOW_DOWNLOAD_PROGRESS, false);
+    if (showDownloadProgress) {
+        core.debug(`${constants_1.INPUT_SHOW_DOWNLOAD_PROGRESS} is true; leaving ${constants_1.MAVEN_ARGS_ENV} unchanged`);
+        return;
+    }
+    const existingArgs = ((_a = process.env[constants_1.MAVEN_ARGS_ENV]) !== null && _a !== void 0 ? _a : '').trim();
+    const alreadyDisabled = existingArgs
+        .split(/\s+/)
+        .some(arg => arg === constants_1.MAVEN_NO_TRANSFER_PROGRESS_FLAG ||
+        arg === constants_1.MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG);
+    if (alreadyDisabled) {
+        core.debug(`${constants_1.MAVEN_ARGS_ENV} already disables transfer progress; leaving it unchanged`);
+        return;
+    }
+    const updatedArgs = existingArgs
+        ? `${existingArgs} ${constants_1.MAVEN_NO_TRANSFER_PROGRESS_FLAG}`
+        : constants_1.MAVEN_NO_TRANSFER_PROGRESS_FLAG;
+    core.exportVariable(constants_1.MAVEN_ARGS_ENV, updatedArgs);
+    core.info(`Configured ${constants_1.MAVEN_ARGS_ENV} to include ${constants_1.MAVEN_NO_TRANSFER_PROGRESS_FLAG} to suppress Maven transfer progress logs. ` +
+        `Set '${constants_1.INPUT_SHOW_DOWNLOAD_PROGRESS}: true' to keep the download progress output.`);
+}
+exports.configureMavenArgs = configureMavenArgs;
 
 
 /***/ }),
@@ -81059,6 +81333,7 @@ const constants = __importStar(__nccwpck_require__(27242));
 const cache_1 = __nccwpck_require__(97377);
 const path = __importStar(__nccwpck_require__(16928));
 const distribution_factory_1 = __nccwpck_require__(2970);
+const maven_args_1 = __nccwpck_require__(38172);
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -81073,6 +81348,8 @@ function run() {
             const cache = core.getInput(constants.INPUT_CACHE);
             const cacheDependencyPath = core.getInput(constants.INPUT_CACHE_DEPENDENCY_PATH);
             const checkLatest = (0, util_1.getBooleanInput)(constants.INPUT_CHECK_LATEST, false);
+            const verifySignature = (0, util_1.getBooleanInput)(constants.INPUT_VERIFY_SIGNATURE, false);
+            const verifySignaturePublicKey = core.getInput(constants.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY) || undefined;
             let toolchainIds = core.getMultilineInput(constants.INPUT_MVN_TOOLCHAIN_ID);
             core.startGroup('Installed distributions');
             if (versions.length !== toolchainIds.length) {
@@ -81085,6 +81362,8 @@ function run() {
                 architecture,
                 packageType,
                 checkLatest,
+                verifySignature,
+                verifySignaturePublicKey,
                 distributionName,
                 jdkFile,
                 toolchainIds
@@ -81106,6 +81385,7 @@ function run() {
             const matchersPath = path.join(__dirname, '..', '..', '.github');
             core.info(`##[add-matcher]${path.join(matchersPath, 'java.json')}`);
             yield auth.configureAuthentication();
+            (0, maven_args_1.configureMavenArgs)();
             if (cache && (0, util_1.isCacheFeatureAvailable)()) {
                 yield (0, cache_1.restore)(cache, cacheDependencyPath);
             }
@@ -81118,11 +81398,13 @@ function run() {
 run();
 function installVersion(version, options, toolchainId = 0) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { distributionName, jdkFile, architecture, packageType, checkLatest, toolchainIds } = options;
+        const { distributionName, jdkFile, architecture, packageType, checkLatest, verifySignature, verifySignaturePublicKey, toolchainIds } = options;
         const installerOptions = {
             architecture,
             packageType,
             checkLatest,
+            verifySignature,
+            verifySignaturePublicKey,
             version
         };
         const distribution = (0, distribution_factory_1.getJavaDistribution)(distributionName, installerOptions, jdkFile);
