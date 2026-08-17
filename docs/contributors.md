@@ -6,13 +6,13 @@ We have prepared a short guide so that the process of making your contribution i
 
 ## How can I contribute...
 
-* [Contribute Documentation:green_book:](#contribute-documentation)
+* [:green_book: Contribute Documentation](#contribute-documentation)
 
-* [Contribute Code :computer:](#contribute-code)
+* [:computer: Contribute Code](#contribute-code)
 
-* [Provide Support on Issues:pencil:](#provide-support-on-issues)
+* [:pencil: Provide Support on Issues](#provide-support-on-issues)
 
-* [Review Pull Requests:mag:](#review-pull-requests)
+* [:mag: Review Pull Requests](#review-pull-requests)
 
 ## Contribute documentation
 
@@ -62,6 +62,17 @@ Pull requests are the easiest way to contribute changes to git repos at GitHub. 
 - To comply with the code style, **you need to run the `format` script**
 - To lint the code, **you need to run the `lint:fix` script**
 - To transpile source code to `javascript` we use [NCC](https://github.com/vercel/ncc). **It is very important to run the `build` script after making changes**, otherwise your changes will not get into the final `javascript` build
+
+> [!TIP]
+> Instead of running each script individually, you can run the aggregate scripts:
+>
+> - `npm run fix` — formats, lints (with autofix) and rebuilds the `dist/` bundle.
+> - `npm run check` — runs the same validation as CI: `format-check`, `lint`, `build` and `test`. **Run this before pushing a pull request** to make sure it will pass the required checks.
+>
+> Git hooks are installed automatically when you run `npm install` (via [husky](https://typicode.github.io/husky/)):
+>
+> - a **pre-commit** hook formats and lints staged files with [lint-staged](https://github.com/lint-staged/lint-staged);
+> - a **pre-push** hook rebuilds `dist/` and runs the test suite.
 
 **Learn more about how to implement tests:**
 
