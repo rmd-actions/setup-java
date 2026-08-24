@@ -1,24 +1,63 @@
+import {
+  jest,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  beforeAll,
+  afterAll
+} from '@jest/globals';
+import {fileURLToPath} from 'url';
 import * as io from '@actions/io';
-import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as path from 'path';
 import os from 'os';
 
-import * as auth from '../src/auth';
-import {M2_DIR, MVN_SETTINGS_FILE} from '../src/constants';
+// Mock @actions/core before importing source modules that depend on it
+jest.unstable_mockModule('@actions/core', () => ({
+  info: jest.fn(),
+  warning: jest.fn(),
+  debug: jest.fn(),
+  error: jest.fn(),
+  notice: jest.fn(),
+  setFailed: jest.fn(),
+  setOutput: jest.fn(),
+  getInput: jest.fn(),
+  getBooleanInput: jest.fn(),
+  getMultilineInput: jest.fn(),
+  addPath: jest.fn(),
+  exportVariable: jest.fn(),
+  saveState: jest.fn(),
+  getState: jest.fn(),
+  setSecret: jest.fn(),
+  isDebug: jest.fn(() => false),
+  startGroup: jest.fn(),
+  endGroup: jest.fn(),
+  group: jest.fn((_name: string, fn: () => Promise<unknown>) => fn()),
+  toPlatformPath: jest.fn((p: string) => p),
+  toWin32Path: jest.fn((p: string) => p),
+  toPosixPath: jest.fn((p: string) => p)
+}));
 
+// Dynamic imports after mocking
+const core = await import('@actions/core');
+const auth = await import('../src/auth.js');
+const {M2_DIR, MVN_SETTINGS_FILE} = await import('../src/constants.js');
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const m2Dir = path.join(__dirname, M2_DIR);
 const settingsFile = path.join(m2Dir, MVN_SETTINGS_FILE);
 
 describe('auth tests', () => {
-  let spyOSHomedir: jest.SpyInstance;
-  let spyInfo: jest.SpyInstance;
+  let spyOSHomedir: any;
+  let spyInfo: any;
 
   beforeEach(async () => {
     await io.rmRF(m2Dir);
     spyOSHomedir = jest.spyOn(os, 'homedir');
     spyOSHomedir.mockReturnValue(__dirname);
-    spyInfo = jest.spyOn(core, 'info');
+    spyInfo = core.info as jest.Mock;
     spyInfo.mockImplementation(() => null);
   }, 300000);
 
@@ -189,9 +228,40 @@ describe('auth tests', () => {
       <username>\${env.${username}}</username>
       <password>\${env.&amp;&lt;&gt;"''"&gt;&lt;&amp;}</password>
     </server>
+  </servers>
+  <profiles>
+    <profile>
+      <id>setup-java-gpg</id>
+      <properties>
+        <gpg.passphraseEnvName>${gpgPassphrase}</gpg.passphraseEnvName>
+      </properties>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>setup-java-gpg</activeProfile>
+  </activeProfiles>
+</settings>`;
+
+    expect(auth.generate(id, username, password, gpgPassphrase)).toEqual(
+      expectedSettings
+    );
+  });
+
+  it('does not add a gpg profile when the passphrase env var is the maven-gpg-plugin default', () => {
+    const id = 'packages';
+    const username = 'USER';
+    const password = '&<>"\'\'"><&';
+    const gpgPassphrase = 'MAVEN_GPG_PASSPHRASE';
+
+    const expectedSettings = `<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <interactiveMode>false</interactiveMode>
+  <servers>
     <server>
-      <id>gpg.passphrase</id>
-      <passphrase>\${env.${gpgPassphrase}}</passphrase>
+      <id>${id}</id>
+      <username>\${env.${username}}</username>
+      <password>\${env.&amp;&lt;&gt;"''"&gt;&lt;&amp;}</password>
     </server>
   </servers>
 </settings>`;
@@ -199,5 +269,56 @@ describe('auth tests', () => {
     expect(auth.generate(id, username, password, gpgPassphrase)).toEqual(
       expectedSettings
     );
+  });
+
+  it('uses deprecated input aliases and warns', () => {
+    const mockGetInput = core.getInput as jest.MockedFunction<
+      typeof core.getInput
+    >;
+    const mockWarning = core.warning as jest.MockedFunction<
+      typeof core.warning
+    >;
+    mockGetInput.mockImplementation(name =>
+      name === 'server-username' ? 'LEGACY_USERNAME' : ''
+    );
+
+    expect(
+      auth.getInputWithDeprecatedAlias(
+        'server-username-env-var',
+        'server-username',
+        'GITHUB_ACTOR'
+      )
+    ).toBe('LEGACY_USERNAME');
+    expect(mockWarning).toHaveBeenCalledWith(
+      "The 'server-username' input is deprecated and may be removed in a future release. Please use 'server-username-env-var' instead."
+    );
+
+    mockGetInput.mockReset();
+    mockWarning.mockReset();
+  });
+
+  it('prefers the replacement input over its deprecated alias', () => {
+    const mockGetInput = core.getInput as jest.MockedFunction<
+      typeof core.getInput
+    >;
+    mockGetInput.mockImplementation(name => {
+      const inputs: Record<string, string> = {
+        'server-password-env-var': 'NEW_PASSWORD',
+        'server-password': 'LEGACY_PASSWORD'
+      };
+      return inputs[name] || '';
+    });
+
+    expect(
+      auth.getInputWithDeprecatedAlias(
+        'server-password-env-var',
+        'server-password',
+        'GITHUB_TOKEN'
+      )
+    ).toBe('NEW_PASSWORD');
+    expect(core.warning).toHaveBeenCalled();
+
+    mockGetInput.mockReset();
+    (core.warning as jest.Mock).mockReset();
   });
 });

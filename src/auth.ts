@@ -6,14 +6,22 @@ import * as fs from 'fs';
 import * as os from 'os';
 
 import {create as xmlCreate} from 'xmlbuilder2';
-import * as constants from './constants';
-import * as gpg from './gpg';
-import {getBooleanInput} from './util';
+import * as constants from './constants.js';
+import * as gpg from './gpg.js';
+import {getBooleanInput} from './util.js';
 
 export async function configureAuthentication() {
   const id = core.getInput(constants.INPUT_SERVER_ID);
-  const username = core.getInput(constants.INPUT_SERVER_USERNAME);
-  const password = core.getInput(constants.INPUT_SERVER_PASSWORD);
+  const usernameEnvVar = getInputWithDeprecatedAlias(
+    constants.INPUT_SERVER_USERNAME_ENV_VAR,
+    constants.INPUT_SERVER_USERNAME_DEPRECATED,
+    constants.INPUT_DEFAULT_SERVER_USERNAME
+  );
+  const passwordEnvVar = getInputWithDeprecatedAlias(
+    constants.INPUT_SERVER_PASSWORD_ENV_VAR,
+    constants.INPUT_SERVER_PASSWORD_DEPRECATED,
+    constants.INPUT_DEFAULT_SERVER_PASSWORD
+  );
   const settingsDirectory =
     core.getInput(constants.INPUT_SETTINGS_PATH) ||
     path.join(os.homedir(), constants.M2_DIR);
@@ -24,9 +32,11 @@ export async function configureAuthentication() {
   const gpgPrivateKey =
     core.getInput(constants.INPUT_GPG_PRIVATE_KEY) ||
     constants.INPUT_DEFAULT_GPG_PRIVATE_KEY;
-  const gpgPassphrase =
-    core.getInput(constants.INPUT_GPG_PASSPHRASE) ||
-    (gpgPrivateKey ? constants.INPUT_DEFAULT_GPG_PASSPHRASE : undefined);
+  const gpgPassphraseEnvVar = getInputWithDeprecatedAlias(
+    constants.INPUT_GPG_PASSPHRASE_ENV_VAR,
+    constants.INPUT_GPG_PASSPHRASE_DEPRECATED,
+    gpgPrivateKey ? constants.INPUT_DEFAULT_GPG_PASSPHRASE : undefined
+  );
 
   if (gpgPrivateKey) {
     core.setSecret(gpgPrivateKey);
@@ -34,11 +44,11 @@ export async function configureAuthentication() {
 
   await createAuthenticationSettings(
     id,
-    username,
-    password,
+    usernameEnvVar,
+    passwordEnvVar,
     settingsDirectory,
     overwriteSettings,
-    gpgPassphrase
+    gpgPassphraseEnvVar
   );
 
   if (gpgPrivateKey) {
@@ -48,13 +58,30 @@ export async function configureAuthentication() {
   }
 }
 
+export function getInputWithDeprecatedAlias(
+  inputName: string,
+  deprecatedInputName: string,
+  defaultValue?: string
+): string {
+  const value = core.getInput(inputName);
+  const deprecatedValue = core.getInput(deprecatedInputName);
+
+  if (deprecatedValue) {
+    core.warning(
+      `The '${deprecatedInputName}' input is deprecated and may be removed in a future release. Please use '${inputName}' instead.`
+    );
+  }
+
+  return value || deprecatedValue || defaultValue || '';
+}
+
 export async function createAuthenticationSettings(
   id: string,
-  username: string,
-  password: string,
+  usernameEnvVar: string,
+  passwordEnvVar: string,
   settingsDirectory: string,
   overwriteSettings: boolean,
-  gpgPassphrase: string | undefined = undefined
+  gpgPassphraseEnvVar: string | undefined = undefined
 ) {
   core.info(`Creating ${constants.MVN_SETTINGS_FILE} with server-id: ${id}`);
   // when an alternate m2 location is specified use only that location (no .m2 directory)
@@ -62,7 +89,7 @@ export async function createAuthenticationSettings(
   await io.mkdirP(settingsDirectory);
   await write(
     settingsDirectory,
-    generate(id, username, password, gpgPassphrase),
+    generate(id, usernameEnvVar, passwordEnvVar, gpgPassphraseEnvVar),
     overwriteSettings
   );
 }
@@ -70,9 +97,9 @@ export async function createAuthenticationSettings(
 // only exported for testing purposes
 export function generate(
   id: string,
-  username: string,
-  password: string,
-  gpgPassphrase?: string | undefined
+  usernameEnvVar: string,
+  passwordEnvVar: string,
+  gpgPassphraseEnvVar?: string | undefined
 ) {
   const xmlObj: {[key: string]: any} = {
     settings: {
@@ -85,20 +112,35 @@ export function generate(
         server: [
           {
             id: id,
-            username: `\${env.${username}}`,
-            password: `\${env.${password}}`
+            username: `\${env.${usernameEnvVar}}`,
+            password: `\${env.${passwordEnvVar}}`
           }
         ]
       }
     }
   };
 
-  if (gpgPassphrase) {
-    const gpgServer = {
-      id: 'gpg.passphrase',
-      passphrase: `\${env.${gpgPassphrase}}`
+  // The maven-gpg-plugin reads the passphrase from the environment variable
+  // named by the `gpg.passphraseEnvName` property (default MAVEN_GPG_PASSPHRASE).
+  // Only configure it when the requested env var name differs from that default;
+  // otherwise the plugin already reads the right variable and no extra settings
+  // are needed. Writing `gpg.passphrase` to settings.xml is deprecated and fails
+  // when the plugin's `bestPractices` mode is enabled.
+  if (
+    gpgPassphraseEnvVar &&
+    gpgPassphraseEnvVar !== constants.MAVEN_GPG_PASSPHRASE_DEFAULT_ENV
+  ) {
+    xmlObj.settings.profiles = {
+      profile: {
+        id: constants.GPG_PASSPHRASE_PROFILE_ID,
+        properties: {
+          'gpg.passphraseEnvName': gpgPassphraseEnvVar
+        }
+      }
     };
-    xmlObj.settings.servers.server.push(gpgServer);
+    xmlObj.settings.activeProfiles = {
+      activeProfile: constants.GPG_PASSPHRASE_PROFILE_ID
+    };
   }
 
   return xmlCreate(xmlObj).end({
