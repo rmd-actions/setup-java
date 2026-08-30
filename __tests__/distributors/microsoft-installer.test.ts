@@ -86,7 +86,7 @@ jest.unstable_mockModule('../../src/util.js', () => ({
 
 jest.unstable_mockModule('../../src/gpg.js', () => ({
   importKey: jest.fn(),
-  deleteKey: jest.fn(),
+  removeGpgHome: jest.fn(),
   verifyPackageSignature: jest.fn()
 }));
 
@@ -103,8 +103,11 @@ const util = await import('../../src/util.js');
 describe('findPackageForDownload', () => {
   let distribution: InstanceType<typeof MicrosoftDistributions>;
   let spyGetManifestFromRepo: any;
+  let spyHttpClientGet: any;
   let spyDebug: any;
   let spyCoreError: any;
+
+  const MICROSOFT_CHECKSUM = 'b'.repeat(64);
 
   beforeEach(() => {
     mockOsArch.mockReturnValue('x64');
@@ -122,6 +125,15 @@ describe('findPackageForDownload', () => {
       result: data,
       statusCode: 200,
       headers: {}
+    });
+
+    // Every resolved release fetches `${download_url}.sha256sum.txt`; stub
+    // it with a GNU-style `<hex>  <filename>` payload so tests never reach
+    // the real network.
+    spyHttpClientGet = jest.spyOn(HttpClient.prototype, 'get');
+    spyHttpClientGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => `${MICROSOFT_CHECKSUM}  microsoft-jdk.tar.gz\n`
     });
 
     spyDebug = core.debug as jest.Mock;
@@ -311,6 +323,34 @@ describe('findPackageForDownload', () => {
       'https://example.test/jdk.tar.gz.custom.sig'
     );
   });
+
+  it('fetches the authoritative sha256 checksum from the GNU-style sibling file', async () => {
+    mockOsPlatform.mockReturnValue(process.platform);
+
+    const result = await distribution['findPackageForDownload']('17.0.7');
+
+    expect(result.checksum).toEqual({
+      algorithm: 'sha256',
+      value: MICROSOFT_CHECKSUM,
+      source: `${result.url}.sha256sum.txt`
+    });
+    expect(spyHttpClientGet).toHaveBeenCalledWith(
+      `${result.url}.sha256sum.txt`
+    );
+    expect(spyHttpClientGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses only the first whitespace-delimited token from the GNU checksum payload', async () => {
+    spyHttpClientGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () =>
+        `${MICROSOFT_CHECKSUM}  microsoft-jdk-17.0.7-linux-x64.tar.gz\n`
+    });
+
+    const result = await distribution['findPackageForDownload']('17.0.7');
+
+    expect(result.checksum?.value).toBe(MICROSOFT_CHECKSUM);
+  });
 });
 
 describe('downloadTool', () => {
@@ -358,13 +398,12 @@ describe('downloadTool', () => {
     jest.restoreAllMocks();
   });
 
-  it('verifies signature when enabled', async () => {
+  it('verifies signatures by default', async () => {
     const signedDistribution = new MicrosoftDistributions({
       version: '17',
       architecture: 'x64',
       packageType: 'jdk',
-      checkLatest: false,
-      verifySignature: true
+      checkLatest: false
     });
 
     await signedDistribution['downloadTool']({
