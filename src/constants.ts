@@ -7,6 +7,7 @@ export const INPUT_DISTRIBUTION = 'distribution';
 export const INPUT_JDK_FILE = 'jdk-file';
 export const INPUT_JDK_FILE_DEPRECATED = 'jdkFile';
 export const INPUT_CHECK_LATEST = 'check-latest';
+export const INPUT_FORCE_DOWNLOAD = 'force-download';
 export const INPUT_SET_DEFAULT = 'set-default';
 export const INPUT_PROBLEM_MATCHER = 'problem-matcher';
 export const INPUT_VERIFY_SIGNATURE = 'verify-signature';
@@ -37,6 +38,8 @@ export const GPG_PASSPHRASE_PROFILE_ID = 'setup-java-gpg';
 
 export const INPUT_CACHE = 'cache';
 export const INPUT_CACHE_DEPENDENCY_PATH = 'cache-dependency-path';
+export const INPUT_CACHE_PATH = 'cache-path';
+export const INPUT_CACHE_READ_ONLY = 'cache-read-only';
 export const INPUT_JOB_STATUS = 'job-status';
 
 export const STATE_GPG_PRIVATE_KEY_FINGERPRINT = 'gpg-private-key-fingerprint';

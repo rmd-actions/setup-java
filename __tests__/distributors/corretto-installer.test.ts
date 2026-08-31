@@ -202,6 +202,12 @@ describe('getAvailableVersions', () => {
         await distribution['findPackageForDownload'](version);
       expect(availableVersion).not.toBeNull();
       expect(availableVersion.url).toBe(expectedLink);
+      expect(availableVersion.checksum).toEqual({
+        algorithm: 'sha256',
+        value: expect.stringMatching(/^[a-f0-9]{64}$/),
+        source:
+          'https://corretto.github.io/corretto-downloads/latest_links/indexmap_with_checksum.json'
+      });
     });
 
     it('with latest resolves to the newest available major version', async () => {
@@ -293,6 +299,19 @@ describe('getAvailableVersions', () => {
         expect(availableVersion.url).toBe(expectedLink);
       }
     );
+
+    it('keeps the canonical ARM runner value separate from the vendor value', () => {
+      jest.spyOn(os, 'arch').mockReturnValue('arm');
+      const distribution = new CorrettoDistribution({
+        version: '11',
+        architecture: '',
+        packageType: 'jdk',
+        checkLatest: false
+      });
+
+      expect(distribution['architecture']).toBe('armv7');
+      expect(distribution['distributionArchitecture']()).toBe('arm');
+    });
   });
 
   const mockPlatform = (

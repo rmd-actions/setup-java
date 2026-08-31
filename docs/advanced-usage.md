@@ -1,7 +1,6 @@
 # Usage
 - [Selecting a Java distribution](#Selecting-a-Java-distribution)
   - [Eclipse Temurin](#Eclipse-Temurin)
-  - [Adopt](#Adopt)
   - [Zulu](#Zulu)
   - [Liberica](#Liberica)
   - [Liberica Native Image Kit](#Liberica-Native-Image-Kit)
@@ -15,6 +14,7 @@
   - [JetBrains](#JetBrains)
   - [Tencent Kona](#Tencent-Kona)
 - [Installing custom Java package type](#Installing-custom-Java-package-type)
+  - [Package compatibility](#Package-compatibility)
   - [JavaFX Maven project](#JavaFX-Maven-project)
 - [Ensuring the Maven cache is complete (plugin dependencies)](#ensuring-the-maven-cache-is-complete-plugin-dependencies)
 - [Installing custom Java architecture](#Installing-custom-Java-architecture)
@@ -44,19 +44,7 @@ steps:
     with:
       distribution: 'temurin'
       java-version: '25'
-  - run: java --version
-```
-
-### Adopt
-**NOTE:** Adopt OpenJDK got moved to Eclipse Temurin and won't be updated anymore. It is highly recommended to migrate workflows from `adopt` to `temurin` to keep receiving software and security updates. See more details in the [Good-bye AdoptOpenJDK post](https://blog.adoptopenjdk.net/2021/08/goodbye-adoptopenjdk-hello-adoptium/).
-
-```yaml
-steps:
-  - uses: actions/checkout@v7
-  - uses: actions/setup-java@v6
-    with:
-      distribution: 'adopt-hotspot'
-      java-version: '11'
+      java-package: 'jdk+jmods' # optional, includes JMOD files with JDK 24 and later
   - run: java --version
 ```
 
@@ -153,6 +141,21 @@ steps:
       java-version: '25'
   - run: java --version
 ```
+
+### Oracle OpenJDK
+Oracle OpenJDK builds are created and hosted by Oracle under GPLv2+CE. To install the latest early-access build for a feature release, append `-ea` to the Java version:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'oracle-openjdk'
+      java-version: '27-ea'
+  - run: java --version
+```
+
+Using `27` without the `-ea` suffix selects a stable (GA) release. Oracle archives OpenJDK builds after a limited number of releases and no longer provides security updates for them. To continue receiving security patches, move to Oracle JDK or choose a different vendor.
 
 ### Alibaba Dragonwell
 **NOTE:** Alibaba Dragonwell only provides jdk.
@@ -266,14 +269,55 @@ steps:
 ```
 
 ## Installing custom Java package type
+
+The `java-package` input selects the vendor artifact to install. It defaults to
+`jdk`. Package availability is a combination of distribution, Java version,
+operating system, and architecture; a package listed below can still be absent
+for a particular platform or patch release. Unless a fixed version range is
+called out, `setup-java` queries the distribution's catalog and installs the
+newest artifact matching `java-version`.
+
+The package types have these meanings:
+
+- `jdk` and `jre` select a development kit or runtime image, respectively.
+- `+fx` selects a vendor bundle that includes JavaFX.
+- `+crac` selects an Azul Zulu build with CRaC support.
+- `+jmods` installs the Temurin JDK and adds its separately published JMOD
+  archive when the JDK does not already contain a `jmods` directory.
+- `+jcef` and `+ft` select JetBrains Runtime bundles with JCEF or FreeType.
+
+### Package compatibility
+
+| Distribution | Supported `java-package` values | Version support and important details |
+| --- | --- | --- |
+| `temurin` | `jdk`, `jre`, `jdk+jmods` | `jdk` and `jre` follow the Adoptium catalog. `jdk+jmods` is available for Java 24 and later and resolves both artifacts at the exact same Java version. |
+| `zulu` | `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac` | Standard JDK builds go back to Java 6; JRE and JavaFX bundles start at Java 8. The vendor catalog has gaps among older non-LTS releases. CRaC bundles start at Java 17 and have more limited OS and architecture availability. |
+| `liberica` | `jdk`, `jre`, `jdk+fx`, `jre+fx` | Standard JDK builds go back to Java 8 in the supported action catalog; JRE and JavaFX "full" bundles also start at Java 8. Exact versions follow BellSoft's catalog for the requested platform. |
+| `liberica-nik` | `jdk`, `jdk+fx` | `java-version` selects the embedded JDK version, not the NIK/GraalVM release number. BellSoft currently publishes matching standard and JavaFX "full" bundles for JDK 11 and later, with gaps between feature releases. Other values are not meaningful: they resolve to the standard bundle. |
+| `microsoft` | `jdk` | Stable builds only. The bundled manifest contains Java 11, 16, 17, 21, and 25 releases; platform availability varies by release. |
+| `semeru` | `jdk`, `jre` | Stable OpenJ9 builds only. IBM publishes both image types for the supported release lines (currently 8, 11, 17, 21, and 25), subject to platform availability. |
+| `corretto` | `jdk`, `jre` | Accepts major versions only. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
+| `oracle` | `jdk` | Stable Oracle JDK 17 and later only. |
+| `oracle-openjdk` | `jdk` | Installs the GA or early-access JDK builds currently listed or archived on `jdk.java.net`; use a `-ea` version such as `27-ea` for early access. |
+| `dragonwell` | `jdk` | Stable builds only. The current vendor catalog provides Java 8, 11, 17, 21, and 25. |
+| `sapmachine` | `jdk`, `jre` | Follows the SapMachine catalog. Both editions are represented from Java 10 onward, but individual versions and platforms can differ. |
+| `graalvm` | `jdk` | Stable Oracle GraalVM for JDK 17 and later only. |
+| `graalvm-community` | `jdk` | Stable GraalVM Community releases for JDK 17 and later only. |
+| `jetbrains` | `jdk`, `jre`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, `jre+ft` | JetBrains publishes selected LTS-based releases rather than every OpenJDK patch. JDK/JRE and JCEF bundles start with the Java 11 release family; FreeType bundles start with Java 17. Exact package, LTS family, patch, OS, and architecture availability is determined from release assets. |
+| `kona` | `jdk` | Stable Java 8, 11, 17, 21, and 25 releases only. |
+| `jdkfile` | `jdk` | The package contents and version are supplied by `jdk-file`; `setup-java` validates the package type but does not inspect the archive contents. |
+
+Values outside this table are unsupported. The action rejects them before
+checking the tool cache or requesting a vendor catalog.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
   - uses: actions/setup-java@v6
     with:
-      distribution: '<distribution>'
-      java-version: '25'
-      java-package: jdk # optional (jdk or jre) - defaults to jdk
+      distribution: 'semeru'
+      java-version: '21'
+      java-package: jre
   - run: java --version
 ```
 
@@ -424,6 +468,36 @@ jobs:
 > which provides purpose-built caching (see the
 > [setup-gradle documentation](https://github.com/gradle/actions/blob/main/docs/setup-gradle.md)).
 
+## Platform and architecture compatibility
+
+The `architecture` input is normalized before setup-java checks the tool cache
+or contacts a vendor. `amd64`, `ia32`, `arm`, and `arm64` are accepted aliases
+for `x64`, `x86`, `armv7`, and `aarch64`. The table lists the combinations
+setup-java validates up front; an individual Java patch release can still be
+absent from a vendor catalog.
+
+| Distribution | Linux | macOS | Windows | Other / version restrictions |
+| --- | --- | --- | --- | --- |
+| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
+| `zulu` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | |
+| `liberica` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Solaris: `x64`. |
+| `liberica-nik` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `microsoft` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `semeru` | `x64`, `x86`, `ppc64le`, `ppc64`, `s390x`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `corretto` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86` | `x86` is limited to Java 11 or earlier; Linux `armv7` is available for Java 11. |
+| `oracle` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `oracle-openjdk` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `dragonwell` | `x64`, `aarch64` | — | `x64` | |
+| `sapmachine` | `x64`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `graalvm`, `graalvm-community` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `jetbrains` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `kona` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `jdkfile` | Any | Any | Any | Local archives are not restricted because setup-java does not inspect their contents. |
+
+Unsupported combinations fail with a platform-capability error before a cache
+lookup or vendor request. A supported combination can still produce a
+version-not-found error when the requested release was not published.
+
 ## Installing custom Java architecture
 
 ```yaml
@@ -469,12 +543,12 @@ In this example, `JAVA_HOME` and `java` on `PATH` point to Java 17, while Java 2
 If your use-case requires a custom distribution or a version that is not provided by setup-java, you can download it manually and setup-java will take care of the installation and caching on the VM:
 
 > [!NOTE]
-> This approach also lets you use builds that setup-java does not provide directly, such as **Early Access (EA)** or other unreleased JDK builds (for example, an upcoming feature release or a Loom/Valhalla preview build). Download the desired archive in a prior step and point `jdk-file` at it; setup-java will extract, install, and cache it just like a supported distribution. When targeting multiple architectures, select the correct binary per architecture in your workflow (for example, with a build matrix).
+> This approach also lets you use builds that setup-java does not provide directly, such as unreleased Loom/Valhalla preview builds or early-access builds not exposed by a supported distribution. Download the desired archive in a prior step and point `jdk-file` at it; setup-java will extract, install, and cache it just like a supported distribution. When targeting multiple architectures, select the correct binary per architecture in your workflow (for example, with a build matrix).
 
 ```yaml
 steps:
   - run: |
-      download_url="https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.10%2B9/OpenJDK11U-jdk_x64_linux_hotspot_11.0.10_9.tar.gz"
+      download_url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.12%2B7/OpenJDK11U-jdk_x64_linux_hotspot_11.0.12_7.tar.gz"
       wget -O $RUNNER_TEMP/java_package.tar.gz $download_url
   - uses: actions/setup-java@v6
     with:
@@ -483,23 +557,6 @@ steps:
       java-version: '11.0.0'
       architecture: x64
     
-  - run: java --version
-```
-
-For example, to use an **Early Access** build from [jdk.java.net](https://jdk.java.net/), download the archive for your runner OS/architecture and install it via `distribution: 'jdkfile'` (example below assumes Linux x64):
-
-```yaml
-steps:
-  - run: |
-      download_url="https://download.java.net/java/early_access/jdk25/36/GPL/openjdk-25-ea+36_linux-x64_bin.tar.gz"
-      wget -O $RUNNER_TEMP/java_package.tar.gz $download_url
-  - uses: actions/setup-java@v6
-    with:
-      distribution: 'jdkfile'
-      jdk-file: ${{ runner.temp }}/java_package.tar.gz
-      java-version: '25.0.0-ea.36'
-      architecture: x64
-
   - run: java --version
 ```
 
@@ -847,9 +904,9 @@ See the help docs on [Publishing a Package with Gradle](https://help.github.com/
 ## Hosted Tool Cache
 GitHub Hosted Runners have a tool cache that comes with some Java versions pre-installed. This tool cache helps speed up runs and tool setup by not requiring any new downloads. There is an environment variable called `RUNNER_TOOL_CACHE` on each runner that describes the location of this tools cache and this is where you can find the pre-installed versions of Java. `setup-java` works by taking a specific version of Java in this tool cache and adding it to PATH if the version, architecture and distribution match.
 
-Currently, LTS versions of Eclipse Temurin (`temurin`) are cached on the GitHub Hosted Runners.
+Currently, LTS versions of Eclipse Temurin (`temurin`) are cached on GitHub-hosted runners. Using a cached version avoids downloading a JDK.
 
-The tools cache gets updated on a weekly basis. For information regarding locally cached versions of Java on GitHub hosted runners, check out [GitHub Actions Virtual Environments](https://github.com/actions/virtual-environments).
+The tools cache gets updated on a weekly basis. See the installed Java versions for [Ubuntu](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#java), [Windows](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md#java), and [macOS](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#java).
 
 ## Modifying Maven Toolchains
 The `setup-java` action generates a basic [Maven Toolchains declaration](https://maven.apache.org/guides/mini/guide-using-toolchains.html) for specified Java versions by either creating a minimal toolchains file or extending an existing declaration with the additional JDKs.
@@ -935,7 +992,7 @@ steps:
   - run: java --version
 ```
 
-In case you install multiple versions of Java at once you can use the same syntax as used in `java-versions`. Please note that you have to declare an ID for all Java versions that will be installed or the `mvn-toolchain-id` instruction will be skipped wholesale due to mapping ambiguities.
+When installing multiple Java versions, use the same multiline syntax as `java-version`. You must declare exactly one ID for every Java version that will be installed. The action fails before installing a JDK unless the number of `mvn-toolchain-id` entries matches the number of `java-version` entries, or is exactly one when `java-version-file` is used.
 
 ```yaml
 steps:

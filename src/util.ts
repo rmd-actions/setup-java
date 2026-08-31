@@ -2,7 +2,6 @@ import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
 import * as semver from 'semver';
-import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 
 import * as tc from '@actions/tool-cache';
@@ -20,8 +19,21 @@ export function getTempDir() {
 }
 
 export function getBooleanInput(inputName: string, defaultValue = false) {
-  return (
-    (core.getInput(inputName) || String(defaultValue)).toUpperCase() === 'TRUE'
+  const inputValue = core.getInput(inputName);
+  const normalizedValue = inputValue.trim().toLowerCase();
+
+  if (!normalizedValue) {
+    return defaultValue;
+  }
+  if (normalizedValue === 'true') {
+    return true;
+  }
+  if (normalizedValue === 'false') {
+    return false;
+  }
+
+  throw new Error(
+    `Invalid value '${inputValue}' for boolean input '${inputName}'. Expected 'true' or 'false'.`
   );
 }
 
@@ -111,24 +123,6 @@ export function isGhes(): boolean {
   const isLocalHost = hostname.endsWith('.LOCALHOST');
 
   return !isGitHubHost && !isGitHubEnterpriseCloudHost && !isLocalHost;
-}
-
-export function isCacheFeatureAvailable(): boolean {
-  if (cache.isFeatureAvailable()) {
-    return true;
-  }
-
-  if (isGhes()) {
-    core.warning(
-      'Caching is only supported on GHES version >= 3.5. If you are on a version >= 3.5, please check with your GHES admin if the Actions cache service is enabled or not.'
-    );
-    return false;
-  }
-
-  core.warning(
-    'The runner was not able to contact the cache service. Caching will be skipped'
-  );
-  return false;
 }
 
 export interface VersionInfo {

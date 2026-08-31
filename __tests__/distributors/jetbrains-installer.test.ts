@@ -9,7 +9,9 @@ import {
   afterAll
 } from '@jest/globals';
 import https from 'https';
-import {HttpClient} from '@actions/http-client';
+import {HttpClient, HttpClientResponse} from '@actions/http-client';
+import type {IncomingMessage} from 'http';
+import {Readable} from 'stream';
 
 import manifestData from '../data/jetbrains.json' with {type: 'json'};
 import os from 'os';
@@ -44,6 +46,18 @@ jest.unstable_mockModule('@actions/core', () => ({
 const core = await import('@actions/core');
 const {JetBrainsDistribution} =
   await import('../../src/distributions/jetbrains/installer.js');
+const {RetryingHttpClient} = await import('../../src/retrying-http-client.js');
+
+function response(
+  statusCode: number,
+  body = '',
+  headers: IncomingMessage['headers'] = {}
+): HttpClientResponse {
+  const message = Readable.from([Buffer.from(body)]) as IncomingMessage;
+  message.statusCode = statusCode;
+  message.headers = headers;
+  return new HttpClientResponse(message);
+}
 
 describe('getAvailableVersions', () => {
   let spyHttpClient: any;
@@ -95,9 +109,66 @@ describe('getAvailableVersions', () => {
       os.platform() === 'win32' ? manifestData.length : manifestData.length + 2;
     expect(availableVersions.length).toBe(length);
   }, 10_000);
+
+  it('retries a GitHub rate limit using Retry-After', async () => {
+    spyHttpClient.mockRestore();
+    const sleep = jest.fn(async () => undefined);
+    const requestRaw = jest
+      .spyOn(HttpClient.prototype, 'requestRaw')
+      .mockResolvedValueOnce(response(429, '', {'retry-after': '2'}))
+      .mockResolvedValueOnce(response(200, '[]'))
+      .mockResolvedValueOnce(response(200))
+      .mockResolvedValueOnce(response(200));
+    const distribution = new JetBrainsDistribution({
+      version: '17',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['http'] = new RetryingHttpClient('test', {
+      sleep,
+      random: () => 0
+    });
+
+    const availableVersions = await distribution['getAvailableVersions']();
+
+    expect(availableVersions).toHaveLength(2);
+    expect(requestRaw).toHaveBeenCalledTimes(4);
+    expect(requestRaw.mock.calls[0][0].options.path).toBe(
+      requestRaw.mock.calls[1][0].options.path
+    );
+    expect(requestRaw.mock.calls[0][0].options.path).toContain(
+      '/repos/JetBrains/JetBrainsRuntime/releases'
+    );
+    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(core.info).toHaveBeenCalledWith(
+      'Request attempt 1 of 4 failed (HTTP 429); retrying in 2000 ms'
+    );
+  });
 });
 
 describe('findPackageForDownload', () => {
+  let spyHttpClientGet: any;
+
+  const JETBRAINS_CHECKSUM = 'c'.repeat(128);
+
+  beforeEach(() => {
+    // Every resolved release fetches `${url}.checksum` (sha512, GNU
+    // `<hex>  <filename>` format); stub it so tests never reach the real
+    // network, except the dedicated 'version %s can be downloaded' test
+    // below which intentionally exercises real HTTPS HEAD requests.
+    spyHttpClientGet = jest
+      .spyOn(HttpClient.prototype, 'get')
+      .mockResolvedValue({
+        message: {statusCode: 200},
+        readBody: async () => `${JETBRAINS_CHECKSUM}  jbrsdk.tar.gz\n`
+      } as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it.each([
     ['17', '17.0.11+1207.24'],
     ['11.0', '11.0.16+2043.64'],
@@ -180,5 +251,73 @@ describe('findPackageForDownload', () => {
     await expect(distribution['findPackageForDownload']('8')).rejects.toThrow(
       /No matching version found for SemVer */
     );
+  });
+
+  it('fetches the authoritative sha512 checksum only for the resolved version', async () => {
+    const distribution = new JetBrainsDistribution({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () => manifestData as any;
+
+    const result = await distribution['findPackageForDownload']('21');
+
+    expect(result.checksum).toEqual({
+      algorithm: 'sha512',
+      value: JETBRAINS_CHECKSUM,
+      source: `${result.url}.checksum`
+    });
+    // Only the single resolved/winning version's checksum is requested,
+    // not one per candidate considered during version resolution.
+    expect(spyHttpClientGet).toHaveBeenCalledWith(`${result.url}.checksum`);
+    expect(spyHttpClientGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses only the first whitespace-delimited token from the GNU checksum payload', async () => {
+    spyHttpClientGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => `${JETBRAINS_CHECKSUM}  jbrsdk-21.tar.gz\n`
+    } as any);
+
+    const distribution = new JetBrainsDistribution({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () => manifestData as any;
+
+    const result = await distribution['findPackageForDownload']('21');
+
+    expect(result.checksum?.value).toBe(JETBRAINS_CHECKSUM);
+  });
+
+  it('falls back to a sha256 checksum for older JBR builds that only publish one', async () => {
+    // Older JBR 11 builds (e.g. jbrsdk_nomod-11_0_16-*-b2043.64.tar.gz) publish
+    // a SHA-256 digest at the generic `.checksum` sibling instead of SHA-512.
+    const sha256Checksum = 'a'.repeat(64);
+    spyHttpClientGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () =>
+        `${sha256Checksum}  jbrsdk_nomod-11_0_16-osx-x64-b2043.64.tar.gz\n`
+    } as any);
+
+    const distribution = new JetBrainsDistribution({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () => manifestData as any;
+
+    const result = await distribution['findPackageForDownload']('21');
+
+    expect(result.checksum).toEqual({
+      algorithm: 'sha256',
+      value: sha256Checksum,
+      source: `${result.url}.checksum`
+    });
   });
 });

@@ -33,6 +33,8 @@ This action allows you to work with Java and Scala projects.
 
   See [GPG](docs/advanced-usage.md#gpg) for details.
 
+- **Legacy AdoptOpenJDK distributions were removed.** Replace `adopt` or `adopt-hotspot` with `temurin`, and replace `adopt-openj9` with `semeru`.
+
 ## Breaking changes in V5
 
 - Upgraded action from node20 to node24
@@ -42,56 +44,70 @@ For more details,  see the full release notes on the [releases page](https://git
 
 ## Usage
 
-    - `java-version`: The Java version that is going to be set up. Takes a whole or [semver](#supported-version-syntax) Java version. If not specified, the action will expect `java-version-file` input to be specified.
+  - `java-version`: The Java version that is going to be set up. Takes a whole or [semver](#supported-version-syntax) Java version. If not specified, the action will expect `java-version-file` input to be specified.
 
-    - `java-version-file`: The path to a file containing java version. Supported file types are `.java-version`, `.tool-versions`, and `.sdkmanrc`. See more details in [about .java-version-file](docs/advanced-usage.md#Java-version-file).
+  - `java-version-file`: The path to a file containing java version. Supported file types are `.java-version`, `.tool-versions`, and `.sdkmanrc`. See more details in [about .java-version-file](docs/advanced-usage.md#Java-version-file).
 
-    - `distribution`: Java [distribution](#supported-distributions). Required unless `java-version-file` points to `.sdkmanrc` with a recognized distribution suffix (for example `java=21.0.5-tem`).
+  - `distribution`: Java [distribution](#supported-distributions). Required unless `java-version-file` points to `.sdkmanrc` with a recognized distribution suffix (for example `java=21.0.5-tem`).
 
-    - `java-package`: The packaging variant of the chosen distribution. Possible values: `jdk`, `jre`, `jdk+fx`, `jre+fx`. For Azul Zulu, `jdk+crac` and `jre+crac` are also supported. Default value: `jdk`.
+  - `java-package`: The packaging variant of the chosen distribution. Possible values across all distributions are `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac`, `jdk+jmods`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, and `jre+ft`. Supported values vary by distribution; see the [package compatibility table](docs/advanced-usage.md#package-compatibility). Default value: `jdk`.
 
-    - `architecture`: The target architecture of the package. Possible values: `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`. Default value: Derived from the runner machine.
+  - `architecture`: The target architecture of the package. Canonical values are `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, and `s390x`; the aliases `ia32`, `amd64`, `arm`, and `arm64` normalize to `x86`, `x64`, `armv7`, and `aarch64`. Supported values vary by distribution and operating system. Default value: Derived from the runner machine.
 
-    - `jdk-file`: If a use-case requires a custom distribution setup-java uses the compressed JDK from the location pointed by this input and will take care of the installation and caching on the VM. Note: `distribution` must be set to 'jdkfile' (case-sensitive; all lowercase) when using this option. (The camelCase `jdkFile` input is still accepted as a deprecated alias and may be removed in a future release.)
+  - `jdk-file`: If a use-case requires a custom distribution setup-java uses the compressed JDK from the location pointed by this input and will take care of the installation and caching on the VM. Note: `distribution` must be set to 'jdkfile' (case-sensitive; all lowercase) when using this option. (The camelCase `jdkFile` input is still accepted as a deprecated alias and may be removed in a future release.)
 
-    - `check-latest`: Setting this option makes the action to check for the latest available version for the version spec.
+  - `check-latest`: Setting this option makes the action to check for the latest available version for the version spec.
 
-    - `set-default`: Set to `false` to install a JDK without making it the default. When `false`, `JAVA_HOME` and `PATH` are not updated, but `JAVA_HOME_<major>_<arch>` is still set so the JDK remains discoverable. Default value: `true`. See [Installing JDK without setting as default](docs/advanced-usage.md#Installing-JDK-without-setting-as-default) for more details.
+  - `force-download`: Set to `true` to always download Java and replace any matching version in the tool cache. This can help make builds reproducible when a runner image has modified a pre-installed JDK, such as its `cacerts` file. Default value: `false`.
 
-    - `problem-matcher`: Set to `false` to disable Java problem matcher annotations (compiler diagnostics and uncaught exceptions). Default value: `true`. See [Java problem matcher](docs/advanced-usage.md#java-problem-matcher-compiler-annotations) for details and annotation limits.
+  - `set-default`: Set to `false` to install a JDK without making it the default. When `false`, `JAVA_HOME` and `PATH` are not updated, but `JAVA_HOME_<major>_<arch>` is still set so the JDK remains discoverable. Default value: `true`. See [Installing JDK without setting as default](docs/advanced-usage.md#Installing-JDK-without-setting-as-default) for more details.
 
-    - `verify-signature`: Verifies downloaded Java package signatures when supported by the selected distribution. Currently supported for `temurin` and `microsoft`. If set to `true` for unsupported distributions, the action fails.
+  - `problem-matcher`: Set to `false` to disable Java problem matcher annotations (compiler diagnostics and uncaught exceptions). Default value: `true`. See [Java problem matcher](docs/advanced-usage.md#java-problem-matcher-compiler-annotations) for details and annotation limits.
 
-    - `verify-signature-public-key`: ASCII-armored GPG public key used to verify the downloaded package signature. Overrides the default bundled key for the selected distribution.
+  - `verify-signature`: Verifies downloaded Java package signatures when supported by the selected distribution. Currently supported for `temurin` and `microsoft`. If set to `true` for unsupported distributions, the action fails.
 
-    - `token`: The token used to authenticate when fetching version manifests hosted on GitHub.com. Defaults to `${{ github.token }}` when running on GitHub.com; defaults to an empty string on GitHub Enterprise Server. On GHES, provide a GitHub.com personal access token if manifest requests are rate-limited. See [Using Microsoft distribution on GHES](docs/advanced-usage.md#using-microsoft-distribution-on-ghes) for more details.
+  - `verify-signature-public-key`: ASCII-armored GPG public key used to verify the downloaded package signature. Overrides the default bundled key for the selected distribution.
 
-    - `cache`: Quick [setup caching](#caching-packages-dependencies) for the dependencies managed through one of the predefined package managers. It can be one of "maven", "gradle" or "sbt".
+  - `token`: The token used to authenticate when fetching version manifests hosted on GitHub.com. Defaults to `${{ github.token }}` when running on GitHub.com; defaults to an empty string on GitHub Enterprise Server. On GHES, provide a GitHub.com personal access token if manifest requests are rate-limited. See [Using Microsoft distribution on GHES](docs/advanced-usage.md#using-microsoft-distribution-on-ghes) for more details.
 
-    - `cache-dependency-path`: The path to a dependency file: pom.xml, build.gradle, build.sbt, etc. This option can be used with the `cache` option. If this option is omitted, the action searches for the dependency file in the entire repository. This option supports wildcards and a list of file names for caching multiple dependencies.
+  - `cache`: Quick [setup caching](#caching-packages-dependencies) for the dependencies managed through one of the predefined package managers. It can be one of "maven", "gradle" or "sbt".
+
+  - `cache-dependency-path`: The path to a dependency file: pom.xml, build.gradle, build.sbt, etc. This option can be used with the `cache` option. If this option is omitted, the action searches for the dependency file in the entire repository. This option supports wildcards and a list of file names for caching multiple dependencies.
+
+  - `cache-path`: The dependency cache path to use instead of the default path for the package manager selected by `cache`. This option supports a list of paths and exclusion patterns. The build tool must be configured to use the same location.
+
+  - `cache-read-only`: Restore dependency caches without saving changes in the post action. Defaults to `false`. Use this for pull requests, merge queues, short-lived branches, and fan-out jobs that should consume caches populated by a default-branch or seed job.
 
   #### Maven options
   The action has a bunch of inputs to generate maven's [settings.xml](https://maven.apache.org/settings.html) on the fly and pass the values to Apache Maven GPG Plugin as well as Apache Maven Toolchains. See [advanced usage](docs/advanced-usage.md) for more.
 
-    - `overwrite-settings`: By default action overwrites the settings.xml. In order to skip generation of file if it exists, set this to `false`.
+  - `overwrite-settings`: By default action overwrites the settings.xml. In order to skip generation of file if it exists, set this to `false`.
 
-    - `server-id`: ID of the distributionManagement repository in the pom.xml file. Default is `github`.
+  - `server-id`: ID of the distributionManagement repository in the pom.xml file. Default is `github`.
 
-    - `server-username-env-var`: Environment variable name for the username for authentication to the Apache Maven repository. Default is GITHUB\_ACTOR.
+  - `server-username-env-var`: Environment variable name for the username for authentication to the Apache Maven repository. Default is GITHUB\_ACTOR.
 
-    - `server-password-env-var`: Environment variable name for password or token for authentication to the Apache Maven repository. Default is GITHUB\_TOKEN.
+  - `server-password-env-var`: Environment variable name for password or token for authentication to the Apache Maven repository. Default is GITHUB\_TOKEN.
 
-    - `settings-path`: Maven related setting to point to the directory where the settings.xml file will be written. Default is \~/.m2.
+  - `settings-path`: Maven related setting to point to the directory where the settings.xml file will be written. Default is \~/.m2.
 
-    - `gpg-private-key`: GPG private key to import. Default is empty string.
+  - `gpg-private-key`: GPG private key to import. Default is empty string.
 
-    - `gpg-passphrase-env-var`: Environment variable name for the GPG private key passphrase. Default is GPG\_PASSPHRASE.
+  - `gpg-passphrase-env-var`: Environment variable name for the GPG private key passphrase. Default is GPG\_PASSPHRASE.
 
-    - `mvn-toolchain-id`: Name of Maven Toolchain ID if the default name of `${distribution}_${java-version}` is not wanted.
+  - `mvn-toolchain-id`: Name of Maven Toolchain ID if the default name of `${distribution}_${java-version}` is not wanted. When supplied, the number of IDs must match the number of Java versions.
 
-    - `mvn-toolchain-vendor`: Name of Maven Toolchain Vendor if the default name of `${distribution}` is not wanted.
+  - `mvn-toolchain-vendor`: Name of Maven Toolchain Vendor if the default name of `${distribution}` is not wanted.
 
-    - `show-download-progress`: Set to `true` to keep Maven artifact download and transfer progress in build logs. Default value: `false`. By default, the action adds `-ntp` (`--no-transfer-progress`) to `MAVEN_ARGS`. This input has no effect on non-Maven builds. See [Maven transfer progress](docs/advanced-usage.md#maven-transfer-progress-download-logs) for more details.
+  - `show-download-progress`: Set to `true` to keep Maven artifact download and transfer progress in build logs. Default value: `false`. By default, the action adds `-ntp` (`--no-transfer-progress`) to `MAVEN_ARGS`. This input has no effect on non-Maven builds. See [Maven transfer progress](docs/advanced-usage.md#maven-transfer-progress-download-logs) for more details.
+
+### Download integrity verification
+
+When a selected distribution publishes an authoritative checksum for an archive, `setup-java` automatically verifies each downloaded JDK, JRE, or JMOD archive before extraction and caching. No input is required. Automatic checksum verification is currently available for `temurin`, `semeru`, `corretto`, `dragonwell`, `kona`, `sapmachine`, `graalvm`, `graalvm-community`, `zulu`, `oracle`, `oracle-openjdk`, `microsoft`, and `jetbrains`.
+
+Distributions or individual releases without an authoritative checksum continue to install normally, with the omission reported only in debug logs. Archives resolved directly from the runner tool cache are not downloaded again and therefore are not reverified.
+
+Checksums detect corrupted or unexpectedly modified downloads before they are persisted in the runner tool cache.
 
 ### Basic Configuration
 
@@ -138,14 +154,13 @@ Currently, the following distributions are supported:
 |-|-|-|
 | `temurin` | [Eclipse Temurin](https://adoptium.net/) | [`temurin` license](https://adoptium.net/about.html)
 | `zulu` | [Azul Zulu OpenJDK](https://www.azul.com/downloads/zulu-community/?package=jdk) | [`zulu` license](https://www.azul.com/products/zulu-and-zulu-enterprise/zulu-terms-of-use/) |
-| `adopt` or `adopt-hotspot` | [AdoptOpenJDK Hotspot](https://adoptopenjdk.net/) | [`adopt-hotspot` license](https://adoptopenjdk.net/about.html) |
-| `adopt-openj9` | [AdoptOpenJDK OpenJ9](https://adoptopenjdk.net/) | [`adopt-openj9` license](https://adoptopenjdk.net/about.html) |
 | `liberica` | [Liberica JDK](https://bell-sw.com/) | [`liberica` license](https://bell-sw.com/liberica_eula/) |
 | `liberica-nik` | [Liberica Native Image Kit](https://bell-sw.com/pages/downloads/native-image-kit/) | [`liberica-nik` license](https://bell-sw.com/liberica_nik_eula/) |
 | `microsoft` | [Microsoft Build of OpenJDK](https://www.microsoft.com/openjdk) | [`microsoft` license](https://docs.microsoft.com/java/openjdk/faq)
 | `corretto` | [Amazon Corretto Build of OpenJDK](https://aws.amazon.com/corretto/) | [`corretto` license](https://aws.amazon.com/corretto/faqs/)
 | `semeru` | [IBM Semeru Runtime Open Edition](https://developer.ibm.com/languages/java/semeru-runtimes/downloads/) | [`semeru` license](https://openjdk.java.net/legal/gplv2+ce.html) |
 | `oracle` | [Oracle JDK](https://www.oracle.com/java/technologies/downloads/) | [`oracle` license](https://java.com/freeuselicense)
+| `oracle-openjdk` | [Oracle OpenJDK](https://jdk.java.net/) | [`oracle-openjdk` license](https://openjdk.org/legal/gplv2+ce.html)
 | `dragonwell` | [Alibaba Dragonwell JDK](https://dragonwell-jdk.io/) | [`dragonwell` license](https://www.aliyun.com/product/dragonwell/)
 | `sapmachine` | [SAP SapMachine JDK/JRE](https://sapmachine.io/) | [`sapmachine` license](https://github.com/SAP/SapMachine/blob/sapmachine/LICENSE)
 | `graalvm` | [Oracle GraalVM](https://www.graalvm.org/) | [`graalvm` license](https://www.oracle.com/downloads/licenses/graal-free-license.html)
@@ -156,7 +171,7 @@ Currently, the following distributions are supported:
 
 > [!NOTE]
 > - The different distributors can provide discrepant list of available versions / supported configurations. Please refer to the official documentation to see the list of supported versions.
-> - AdoptOpenJDK got moved to Eclipse Temurin and won't be updated anymore. It is highly recommended to migrate workflows from `adopt` and `adopt-openj9`, to `temurin` and `semeru` respectively, to keep receiving software and security updates. See more details in the [Good-bye AdoptOpenJDK post](https://blog.adoptopenjdk.net/2021/08/goodbye-adoptopenjdk-hello-adoptium/).
+> - Oracle OpenJDK builds are created and hosted by Oracle. After a limited number of releases, Oracle archives these builds and no longer provides security updates. To continue receiving security patches, users must move to Oracle JDK or choose a different vendor.
 > - For Azul Zulu OpenJDK, architecture `arm64` is mapped to `aarch64` when querying the Azul Metadata API.
 > - To comply with the GraalVM Free Terms and Conditions (GFTC) license, it is recommended to use GraalVM JDK 17 version 17.0.12, as this is the only version of GraalVM JDK 17 available under the GFTC license. Additionally, it is encouraged to consider upgrading to GraalVM JDK 21, which offers the latest features and improvements.
 > - GraalVM Community is available as `distribution: 'graalvm-community'` for stable JDK 17 and later releases published on GitHub.
@@ -174,11 +189,87 @@ The action has a built-in functionality for caching and restoring dependencies. 
 
 When the option `cache-dependency-path` is specified, the hash is based on the matching file. This option supports wildcards and a list of file names, and is especially useful for monorepos.
 
+Use `cache-path` to replace the selected package manager's default dependency
+cache paths. Each non-empty line is passed to `actions/cache`, including
+supported exclusion patterns. `setup-java` does not configure the build tool,
+so the build must use the same paths:
+
+```yaml
+- uses: actions/setup-java@v6
+  with:
+    distribution: 'temurin'
+    java-version: '25'
+    cache: 'maven'
+    cache-path: |
+      /custom/maven/repository
+      !/custom/maven/repository/**/*.lastUpdated
+- run: mvn -Dmaven.repo.local=/custom/maven/repository verify
+```
+
+`cache-path` does not change the cache key. The key continues to use the runner
+OS, architecture, selected package manager, and dependency-file hash described
+above. Jobs intended to share a cache key must therefore use the same
+`cache-path` values so that they restore and save the same filesystem
+locations.
+
+The Maven and Gradle wrapper caches remain at their documented default paths
+and are managed independently of `cache-path`. For advanced keying, fallback
+keys, or cache topologies that do not map to one package manager's dependency
+paths, use [`actions/cache`](https://github.com/actions/cache) directly.
+
 The workflow output `cache-hit` is set to indicate if an exact match was found for the key [as actions/cache does](https://github.com/actions/cache/tree/main#outputs).
 
 The workflow output `cache-primary-key` exposes the primary cache key computed by the action for the configured build tool. It is useful for composing with [`actions/cache`](https://github.com/actions/cache) or [`actions/cache/restore`](https://github.com/actions/cache/tree/main/restore) in later steps or dependent jobs that need to reuse the exact same key. It is empty when caching is not enabled or when caching is skipped (for example, when the cache service is unavailable).
 
 The cache input is optional, and caching is turned off by default.
+
+Set `cache-read-only: true` to restore the main dependency cache and any Maven
+or Gradle wrapper cache without archiving or uploading changes after the job.
+For example, a workflow can allow only the default branch to write caches while
+pull requests, merge queues, and short-lived branches remain read-only:
+
+```yaml
+- uses: actions/setup-java@v6
+  with:
+    distribution: 'temurin'
+    java-version: '25'
+    cache: 'maven'
+    cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+```
+
+For a fan-out matrix, use one seed job to populate a complete cache and make
+every matrix job a read-only consumer. The seed and consumers must use the same
+runner OS and cache dependency inputs so they compute the same key:
+
+```yaml
+jobs:
+  seed-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+      - run: mvn dependency:go-offline dependency:resolve-plugins
+
+  build:
+    needs: seed-cache
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goal: [test, verify, package]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+          cache-read-only: true
+      - run: mvn ${{ matrix.goal }}
+```
 
 **Maven Wrapper:** when `cache: 'maven'` is enabled, the action also caches and restores the Maven Wrapper distribution downloaded to `~/.m2/wrapper/dists` (in addition to the local repository), so wrapper-based (`./mvnw`) builds don't re-download the Maven distribution. The wrapper distribution is stored in a **separate** cache entry keyed only on `**/.mvn/wrapper/maven-wrapper.properties`, so it stays cached across the frequent `pom.xml` changes that rotate the main dependency cache key.
 
@@ -262,6 +353,8 @@ steps:
 In the basic examples above, the `check-latest` flag defaults to `false`. When set to `false`, the action tries to first resolve a version of Java from the local tool cache on the runner. If unable to find a specific version in the cache, the action will download a version of Java. Use the default or set `check-latest` to `false` if you prefer a faster more consistent setup experience that prioritizes trying to use the cached versions at the expense of newer versions sometimes being available for download.
 
 If `check-latest` is set to `true`, the action first checks if the cached version is the latest one. If the locally cached version is not the most up-to-date, the latest version of Java will be downloaded. Set `check-latest` to `true` if you want the most up-to-date version of Java to always be used. Setting `check-latest` to `true` has performance implications as downloading versions of Java is slower than using cached versions.
+
+[GitHub-hosted runners](https://github.com/actions/runner-images) include Eclipse Temurin JDKs in their tool cache. Selecting Eclipse Temurin (`distribution: 'temurin'`) can save setup time by using a pre-installed JDK instead of downloading one. See the installed Java versions for [Ubuntu](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#java), [Windows](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md#java), and [macOS](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#java).
 
 For Java distributions that are not cached on Hosted images, `check-latest` always behaves as `true` and downloads Java on the fly. Check out [Hosted Tool Cache](docs/advanced-usage.md#Hosted-Tool-Cache) for more details about pre-cached Java versions.
 
