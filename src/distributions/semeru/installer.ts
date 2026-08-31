@@ -6,6 +6,7 @@ import {
 } from '../base-models.js';
 import semver from 'semver';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getNextPageUrlFromLinkHeader,
   getDownloadArchiveExtension,
@@ -15,7 +16,6 @@ import {
   validatePaginationUrl
 } from '../../util.js';
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 import fs from 'fs';
 import path from 'path';
 import {ISemeruAvailableVersions} from './models.js';
@@ -69,7 +69,12 @@ export class SemeruDistribution extends JavaBase {
           : item.version_data.semver.replace('-beta+', '+');
         return {
           version: formattedVersion,
-          url: item.binaries[0].package.link
+          url: item.binaries[0].package.link,
+          checksum: {
+            algorithm: 'sha256',
+            value: item.binaries[0].package.checksum,
+            source: item.binaries[0].package.checksum_link
+          }
         } as JavaDownloadRelease;
       });
 
@@ -104,7 +109,7 @@ export class SemeruDistribution extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -120,7 +125,7 @@ export class SemeruDistribution extends JavaBase {
     const archivePath = path.join(extractedJavaPath, archiveName);
     const version = this.getToolcacheVersionName(javaRelease.version);
 
-    const javaPath: string = await tc.cacheDir(
+    const javaPath: string = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,

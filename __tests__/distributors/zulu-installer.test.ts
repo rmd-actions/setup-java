@@ -8,6 +8,7 @@ import {
   beforeAll,
   afterAll
 } from '@jest/globals';
+import fs from 'fs';
 import type {IZuluVersions} from '../../src/distributions/zulu/models.js';
 import {HttpClient} from '@actions/http-client';
 import os from 'os';
@@ -241,6 +242,26 @@ describe('getArchitectureOptions', () => {
 });
 
 describe('findPackageForDownload', () => {
+  let spyPackageDetails: any;
+
+  const ZULU_CHECKSUM = 'a'.repeat(64);
+
+  beforeEach(() => {
+    // The resolved winning package fetches sha256_hash from the Azul
+    // package-details endpoint; stub it so tests never reach the real
+    // network.
+    spyPackageDetails = jest.spyOn(HttpClient.prototype, 'getJson');
+    spyPackageDetails.mockResolvedValue({
+      statusCode: 200,
+      headers: {},
+      result: {sha256_hash: ZULU_CHECKSUM}
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it.each([
     ['8', '8.0.282+8'],
     ['11.x', '11.0.10+9'],
@@ -279,6 +300,38 @@ describe('findPackageForDownload', () => {
     expect(result.url).toBe(
       'https://cdn.azul.com/zulu/bin/zulu11.35.15-ca-jdk11.0.5-macosx_x64.tar.gz'
     );
+    expect(result.checksum).toEqual({
+      algorithm: 'sha256',
+      value: ZULU_CHECKSUM,
+      source: 'https://api.azul.com/metadata/v1/zulu/packages/test-uuid-10933'
+    });
+    // Only the winning package's UUID triggers a details request.
+    expect(spyPackageDetails).toHaveBeenCalledWith(
+      'https://api.azul.com/metadata/v1/zulu/packages/test-uuid-10933'
+    );
+    expect(spyPackageDetails).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips checksum verification when sha256_hash is missing or malformed', async () => {
+    spyPackageDetails.mockResolvedValue({
+      statusCode: 200,
+      headers: {},
+      result: {sha256_hash: 'not-a-valid-digest'}
+    });
+
+    const distribution = new ZuluDistribution({
+      version: '',
+      architecture: 'x86',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () => manifestData;
+    const result = await distribution['findPackageForDownload']('11.0.5');
+
+    expect(result.checksum).toBeUndefined();
+    expect(core.debug).toHaveBeenCalledWith(
+      expect.stringContaining('No authoritative sha256 checksum')
+    );
   });
 
   it('should throw an error', async () => {
@@ -292,5 +345,52 @@ describe('findPackageForDownload', () => {
     await expect(
       distribution['findPackageForDownload'](distribution['version'])
     ).rejects.toThrow(/No matching version found for SemVer/);
+  });
+});
+
+describe('Zulu getPlatformOption libc selection', () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(
+    process,
+    'platform'
+  ) as PropertyDescriptor;
+
+  const setPlatform = (platform: NodeJS.Platform) =>
+    Object.defineProperty(process, 'platform', {
+      ...originalPlatform,
+      value: platform
+    });
+
+  const distribution = new ZuluDistribution({
+    version: '21',
+    architecture: 'x64',
+    packageType: 'jdk',
+    checkLatest: false
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    jest.restoreAllMocks();
+  });
+
+  it('selects the musl artifacts on Alpine', () => {
+    setPlatform('linux');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    expect(distribution['getPlatformOption']()).toBe('linux_musl');
+  });
+
+  it('selects the glibc artifacts on other Linux runners', () => {
+    setPlatform('linux');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    expect(distribution['getPlatformOption']()).toBe('linux_glibc');
+  });
+
+  it('does not probe for Alpine off Linux', () => {
+    setPlatform('win32');
+    const existsSync = jest.spyOn(fs, 'existsSync');
+
+    expect(distribution['getPlatformOption']()).toBe('windows');
+    expect(existsSync).not.toHaveBeenCalled();
   });
 });
