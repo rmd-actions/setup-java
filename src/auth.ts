@@ -4,11 +4,10 @@ import * as io from '@actions/io';
 
 import * as fs from 'fs';
 import * as os from 'os';
-
-import {create as xmlCreate} from 'xmlbuilder2';
 import * as constants from './constants.js';
 import * as gpg from './gpg.js';
 import {getBooleanInput} from './util.js';
+import {escapeXmlText} from './xml.js';
 
 export async function configureAuthentication() {
   const id = core.getInput(constants.INPUT_SERVER_ID);
@@ -53,8 +52,14 @@ export async function configureAuthentication() {
 
   if (gpgPrivateKey) {
     core.info('Importing private gpg key');
-    const keyFingerprint = (await gpg.importKey(gpgPrivateKey)) || '';
-    core.saveState(constants.STATE_GPG_PRIVATE_KEY_FINGERPRINT, keyFingerprint);
+    const gpgHome = await gpg.importKey(gpgPrivateKey);
+    try {
+      core.saveState(constants.STATE_GPG_HOME, gpgHome);
+      core.exportVariable('GNUPGHOME', gpg.toGpgPath(gpgHome));
+    } catch (error) {
+      await gpg.removeGpgHome(gpgHome);
+      throw error;
+    }
   }
 }
 
@@ -101,53 +106,48 @@ export function generate(
   passwordEnvVar: string,
   gpgPassphraseEnvVar?: string | undefined
 ) {
-  const xmlObj: {[key: string]: any} = {
-    settings: {
-      '@xmlns': 'http://maven.apache.org/SETTINGS/1.0.0',
-      '@xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
-      '@xsi:schemaLocation':
-        'http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd',
-      interactiveMode: false,
-      servers: {
-        server: [
-          {
-            id: id,
-            username: `\${env.${usernameEnvVar}}`,
-            password: `\${env.${passwordEnvVar}}`
-          }
-        ]
-      }
-    }
-  };
-
   // The maven-gpg-plugin reads the passphrase from the environment variable
   // named by the `gpg.passphraseEnvName` property (default MAVEN_GPG_PASSPHRASE).
   // Only configure it when the requested env var name differs from that default;
   // otherwise the plugin already reads the right variable and no extra settings
   // are needed. Writing `gpg.passphrase` to settings.xml is deprecated and fails
   // when the plugin's `bestPractices` mode is enabled.
-  if (
+  const includeGpgPassphraseProfile =
     gpgPassphraseEnvVar &&
-    gpgPassphraseEnvVar !== constants.MAVEN_GPG_PASSPHRASE_DEFAULT_ENV
-  ) {
-    xmlObj.settings.profiles = {
-      profile: {
-        id: constants.GPG_PASSPHRASE_PROFILE_ID,
-        properties: {
-          'gpg.passphraseEnvName': gpgPassphraseEnvVar
-        }
-      }
-    };
-    xmlObj.settings.activeProfiles = {
-      activeProfile: constants.GPG_PASSPHRASE_PROFILE_ID
-    };
+    gpgPassphraseEnvVar !== constants.MAVEN_GPG_PASSPHRASE_DEFAULT_ENV;
+
+  const lines = [
+    '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"',
+    '  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+    '  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">',
+    '  <interactiveMode>false</interactiveMode>',
+    '  <servers>',
+    '    <server>',
+    `      <id>${escapeXmlText(id)}</id>`,
+    `      <username>${escapeXmlText(`\${env.${usernameEnvVar}}`)}</username>`,
+    `      <password>${escapeXmlText(`\${env.${passwordEnvVar}}`)}</password>`,
+    '    </server>',
+    '  </servers>'
+  ];
+
+  if (includeGpgPassphraseProfile) {
+    lines.push(
+      '  <profiles>',
+      '    <profile>',
+      `      <id>${constants.GPG_PASSPHRASE_PROFILE_ID}</id>`,
+      '      <properties>',
+      `        <gpg.passphraseEnvName>${escapeXmlText(gpgPassphraseEnvVar)}</gpg.passphraseEnvName>`,
+      '      </properties>',
+      '    </profile>',
+      '  </profiles>',
+      '  <activeProfiles>',
+      `    <activeProfile>${constants.GPG_PASSPHRASE_PROFILE_ID}</activeProfile>`,
+      '  </activeProfiles>'
+    );
   }
 
-  return xmlCreate(xmlObj).end({
-    headless: true,
-    prettyPrint: true,
-    width: 80
-  });
+  lines.push('</settings>');
+  return lines.join('\n');
 }
 
 async function write(

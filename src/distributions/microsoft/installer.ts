@@ -5,6 +5,7 @@ import {
   JavaInstallerResults
 } from '../base-models.js';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getDownloadArchiveExtension,
   getGitHubHttpHeaders,
@@ -31,7 +32,7 @@ export class MicrosoftDistributions extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     if (this.verifySignature) {
       if (!javaRelease.signatureUrl) {
@@ -64,7 +65,7 @@ export class MicrosoftDistributions extends JavaBase {
     const archiveName = fs.readdirSync(extractedJavaPath)[0];
     const archivePath = path.join(extractedJavaPath, archiveName);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       this.getToolcacheVersionName(javaRelease.version),
@@ -114,7 +115,11 @@ export class MicrosoftDistributions extends JavaBase {
     return {
       url: file.download_url,
       signatureUrl,
-      version: foundRelease.version
+      version: foundRelease.version,
+      checksum: await this.fetchChecksum(
+        `${file.download_url}.sha256sum.txt`,
+        'sha256'
+      )
     };
   }
 

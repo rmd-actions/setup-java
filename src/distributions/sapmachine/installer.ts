@@ -1,10 +1,10 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 import semver from 'semver';
 import fs from 'fs';
 import {OutgoingHttpHeaders} from 'http';
 import path from 'path';
 import {
+  cacheJdkDir,
   convertVersionToSemver,
   extractJdkFile,
   getDownloadArchiveExtension,
@@ -17,6 +17,7 @@ import {
   JavaInstallerOptions,
   JavaInstallerResults
 } from '../base-models.js';
+import {isAlpineLinux} from '../platform-types.js';
 import {ISapMachineAllVersions, ISapMachineVersions} from './models.js';
 
 export class SapMachineDistribution extends JavaBase {
@@ -56,7 +57,14 @@ export class SapMachineDistribution extends JavaBase {
     }
 
     const resolvedVersion = matchedVersions[0];
-    return resolvedVersion;
+    const checksumUrl = resolvedVersion.url.replace(
+      /\.(?:tar\.gz|zip)$/,
+      '.sha256.txt'
+    );
+    return {
+      ...resolvedVersion,
+      checksum: await this.fetchChecksum(checksumUrl, 'sha256')
+    };
   }
 
   private async getAvailableVersions(): Promise<ISapMachineVersions[]> {
@@ -104,7 +112,7 @@ export class SapMachineDistribution extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -117,7 +125,7 @@ export class SapMachineDistribution extends JavaBase {
     const archivePath = path.join(extractedJavaPath, archiveName);
     const version = this.getToolcacheVersionName(javaRelease.version);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,
@@ -167,8 +175,9 @@ export class SapMachineDistribution extends JavaBase {
             continue;
           }
 
-          // skip earlyAccessVersions if stable version requested
-          if (this.stable && buildVersionMap.ea === 'true') {
+          const isEarlyAccess =
+            buildVersionMap.ea === true || buildVersionMap.ea === 'true';
+          if (this.stable === isEarlyAccess) {
             continue;
           }
 
@@ -235,7 +244,7 @@ export class SapMachineDistribution extends JavaBase {
         return 'macos';
       case 'linux':
         // figure out if alpine/musl
-        if (fs.existsSync('/etc/alpine-release')) {
+        if (isAlpineLinux()) {
           return 'linux-musl';
         }
         return 'linux';

@@ -2,16 +2,19 @@ import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
 import * as semver from 'semver';
-import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 
 import * as tc from '@actions/tool-cache';
+import * as exec from '@actions/exec';
+import * as io from '@actions/io';
 import * as httpm from '@actions/http-client';
+import {randomUUID} from 'crypto';
 import {
   INPUT_JOB_STATUS,
-  DISTRIBUTIONS_ONLY_MAJOR_VERSION
+  DISTRIBUTIONS_ONLY_MAJOR_VERSION,
+  INPUT_CACHE_JDK
 } from './constants.js';
-import {OutgoingHttpHeaders} from 'http';
+import {IncomingHttpHeaders, OutgoingHttpHeaders} from 'http';
 
 export function getTempDir() {
   const tempDirectory = process.env['RUNNER_TEMP'] || os.tmpdir();
@@ -20,9 +23,28 @@ export function getTempDir() {
 }
 
 export function getBooleanInput(inputName: string, defaultValue = false) {
-  return (
-    (core.getInput(inputName) || String(defaultValue)).toUpperCase() === 'TRUE'
+  const inputValue = core.getInput(inputName);
+  const normalizedValue = inputValue.trim().toLowerCase();
+
+  if (!normalizedValue) {
+    return defaultValue;
+  }
+  if (normalizedValue === 'true') {
+    return true;
+  }
+  if (normalizedValue === 'false') {
+    return false;
+  }
+
+  throw new Error(
+    `Invalid value '${inputValue}' for boolean input '${inputName}'. Expected 'true' or 'false'.`
   );
+}
+
+export function isJdkCacheEnabled(cache: string): boolean {
+  return core.getInput(INPUT_CACHE_JDK).trim()
+    ? getBooleanInput(INPUT_CACHE_JDK)
+    : Boolean(cache.trim());
 }
 
 export function getVersionFromToolcachePath(toolPath: string) {
@@ -45,13 +67,205 @@ export async function extractJdkFile(toolPath: string, extension?: string) {
 
   switch (extension) {
     case 'tar.gz':
+      return await extractTarGz(toolPath);
     case 'tar':
       return await tc.extractTar(toolPath);
     case 'zip':
-      return await tc.extractZip(toolPath);
+      return await extractZipArchive(toolPath);
     default:
       return await tc.extract7z(toolPath);
   }
+}
+
+async function createExtractFolder(): Promise<string> {
+  const dest = path.join(getTempDir(), randomUUID());
+  await io.mkdirP(dest);
+
+  return dest;
+}
+
+/**
+ * Decompressing a JDK tarball with the default single-threaded gzip is one of the
+ * slowest parts of the install, so hand the decompression to `pigz` when the runner
+ * provides it. Any failure falls back to the stock extraction.
+ */
+async function extractTarGz(toolPath: string): Promise<string> {
+  const pigzPath = await io.which('pigz');
+  // tar splits --use-compress-program on whitespace, so a path containing a
+  // space would be word-split into a bogus command.
+  if (pigzPath && !/\s/.test(pigzPath)) {
+    const dest = await createExtractFolder();
+    try {
+      return await tc.extractTar(toolPath, dest, [
+        '--use-compress-program',
+        `${pigzPath} -d`,
+        '-x'
+      ]);
+    } catch (error) {
+      await io.rmRF(dest);
+      core.debug(
+        `Failed to extract '${toolPath}' with pigz, falling back to gzip: ${getErrorMessage(error)}`
+      );
+    }
+  }
+
+  return await tc.extractTar(toolPath);
+}
+
+/**
+ * `tc.extractZip` shells out to PowerShell's `Expand-Archive` on Windows, which is
+ * several times slower than the bundled bsdtar. Prefer `tar.exe` and fall back to
+ * the stock extraction when it is unavailable or fails.
+ */
+async function extractZipArchive(toolPath: string): Promise<string> {
+  if (process.platform === 'win32') {
+    const systemTar = path.join(
+      process.env['SystemRoot'] || 'C:\\Windows',
+      'System32',
+      'tar.exe'
+    );
+
+    if (fs.existsSync(systemTar)) {
+      const dest = await createExtractFolder();
+      try {
+        await exec.exec(`"${systemTar}"`, ['-xf', toolPath, '-C', dest], {
+          silent: true
+        });
+
+        return dest;
+      } catch (error) {
+        await io.rmRF(dest);
+        core.debug(
+          `Failed to extract '${toolPath}' with tar.exe, falling back to Expand-Archive: ${getErrorMessage(error)}`
+        );
+      }
+    }
+  }
+
+  return await tc.extractZip(toolPath);
+}
+
+/**
+ * Equivalent of `tc.cacheDir`, but moves the extracted JDK into the tool-cache
+ * instead of copying it. `tc.cacheDir` recursively copies the whole tree, which
+ * means a several hundred megabyte JDK is written to disk twice. The extraction
+ * directory and the tool-cache normally live on the same filesystem, so a rename
+ * is effectively free. Anything unexpected (a different filesystem, or a file
+ * handle held open by anti-virus software on Windows) falls back to the copy.
+ */
+export async function cacheJdkDir(
+  sourceDir: string,
+  toolName: string,
+  version: string,
+  architecture: string
+): Promise<string> {
+  const destPath = getToolcacheDestination(toolName, version, architecture);
+
+  if (destPath) {
+    let moved = false;
+    try {
+      // lstat, not stat: renaming a symlinked source would put the link itself
+      // in the tool-cache, leaving a dangling JAVA_HOME once RUNNER_TEMP is
+      // cleaned. tc.cacheDir dereferences it, so let it handle that case.
+      if (fs.lstatSync(sourceDir).isDirectory()) {
+        await io.rmRF(destPath);
+        await io.rmRF(`${destPath}.complete`);
+        await io.mkdirP(path.dirname(destPath));
+        // Renaming is atomic, so a failure here leaves sourceDir untouched and
+        // the copy-based fallback below can still run.
+        fs.renameSync(sourceDir, destPath);
+        moved = true;
+      }
+    } catch (error) {
+      core.debug(
+        `Failed to move '${sourceDir}' into the tool-cache, falling back to a copy: ${getErrorMessage(error)}`
+      );
+    }
+
+    if (moved) {
+      fs.writeFileSync(`${destPath}.complete`, '');
+
+      return destPath;
+    }
+  }
+
+  return await tc.cacheDir(sourceDir, toolName, version, architecture);
+}
+
+export function getJavaVersionFromReleaseFile(javaHome: string): string {
+  const releasePaths = [
+    path.join(javaHome, 'release'),
+    path.join(javaHome, 'Contents', 'Home', 'release')
+  ];
+  const releasePath = releasePaths.find(candidate => fs.existsSync(candidate));
+  if (!releasePath) {
+    throw new Error(
+      `Unable to determine the installed Java version: no release file found under '${javaHome}'.`
+    );
+  }
+
+  const properties = new Map<string, string>();
+  for (const line of fs.readFileSync(releasePath, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)="(.*)"$/);
+    if (match) {
+      properties.set(match[1], match[2]);
+    }
+  }
+
+  const runtimeVersion = properties.get('JAVA_RUNTIME_VERSION');
+  const runtimeMatch = runtimeVersion?.match(
+    /^(\d+(?:\.\d+)*(?:\+\d+(?:\.\d+)*)?)/
+  );
+  if (runtimeMatch) {
+    return normalizeJavaReleaseVersion(runtimeMatch[1]);
+  }
+
+  const javaVersion = properties.get('JAVA_VERSION');
+  if (javaVersion && /^\d+(?:\.\d+)*$/.test(javaVersion)) {
+    return normalizeJavaReleaseVersion(javaVersion);
+  }
+
+  throw new Error(
+    `Unable to determine the installed Java version from '${releasePath}'.`
+  );
+}
+
+function normalizeJavaReleaseVersion(version: string): string {
+  const [numericVersion, buildVersion] = version.split('+', 2);
+  const components = numericVersion.split('.');
+  while (components.length < 3) {
+    components.push('0');
+  }
+
+  const mainVersion = components.slice(0, 3).join('.');
+  const build = [
+    ...components.slice(3),
+    ...(buildVersion ? [buildVersion] : [])
+  ];
+  return build.length > 0 ? `${mainVersion}+${build.join('.')}` : mainVersion;
+}
+
+function getToolcacheDestination(
+  toolName: string,
+  version: string,
+  architecture: string
+): string | null {
+  const toolcacheRoot = process.env['RUNNER_TOOL_CACHE'];
+  if (!toolcacheRoot) {
+    return null;
+  }
+
+  // Mirrors the destination layout used by `tc.cacheDir`.
+  return path.join(
+    toolcacheRoot,
+    toolName,
+    semver.clean(version) || version,
+    architecture || os.arch()
+  );
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function getDownloadArchiveExtension() {
@@ -111,24 +325,6 @@ export function isGhes(): boolean {
   const isLocalHost = hostname.endsWith('.LOCALHOST');
 
   return !isGitHubHost && !isGitHubEnterpriseCloudHost && !isLocalHost;
-}
-
-export function isCacheFeatureAvailable(): boolean {
-  if (cache.isFeatureAvailable()) {
-    return true;
-  }
-
-  if (isGhes()) {
-    core.warning(
-      'Caching is only supported on GHES version >= 3.5. If you are on a version >= 3.5, please check with your GHES admin if the Actions cache service is enabled or not.'
-    );
-    return false;
-  }
-
-  core.warning(
-    'The runner was not able to contact the cache service. Caching will be skipped'
-  );
-  return false;
 }
 
 export interface VersionInfo {
@@ -310,8 +506,50 @@ export function convertVersionToSemver(version: number[] | string) {
   return mainVersion;
 }
 
+/**
+ * Builds a validator for the bytes currently served by a URL from the response
+ * headers of a HEAD request. A vendor's `/latest/` URL never changes, so this
+ * is what lets a republished artifact be told apart from the previous one when
+ * no checksum is published alongside it.
+ *
+ * Returns `undefined` when the response carries no usable validator, in which
+ * case the caller must not treat the URL as a stable identity.
+ */
+export function getArtifactFingerprint(
+  headers: IncomingHttpHeaders | undefined
+): string | undefined {
+  const readHeader = (name: string): string | undefined => {
+    const value = headers?.[name];
+    const resolved = Array.isArray(value) ? value[0] : value;
+    return typeof resolved === 'string' && resolved.trim()
+      ? resolved.trim()
+      : undefined;
+  };
+
+  // A strong or weak ETag already identifies a specific representation.
+  const etag = readHeader('etag');
+  if (etag) {
+    return `etag:${etag}`;
+  }
+
+  // Otherwise combine the two validators a static file server reliably sends.
+  // Neither alone is sufficient: `last-modified` has one-second granularity and
+  // `content-length` is unchanged by a same-size rebuild.
+  const lastModified = readHeader('last-modified');
+  const contentLength = readHeader('content-length');
+  if (lastModified && contentLength) {
+    return `mtime:${lastModified};length:${contentLength}`;
+  }
+
+  return undefined;
+}
+
+export function getGitHubToken(): string | undefined {
+  return core.getInput('token') || process.env.GITHUB_TOKEN;
+}
+
 export function getGitHubHttpHeaders(): OutgoingHttpHeaders {
-  const resolvedToken = core.getInput('token') || process.env.GITHUB_TOKEN;
+  const resolvedToken = getGitHubToken();
   const auth = !resolvedToken ? undefined : `token ${resolvedToken}`;
 
   const headers: OutgoingHttpHeaders = {

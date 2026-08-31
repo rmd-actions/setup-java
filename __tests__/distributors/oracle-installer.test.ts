@@ -47,7 +47,10 @@ describe('findPackageForDownload', () => {
   let distribution: InstanceType<typeof OracleDistribution>;
   let spyDebug: any;
   let spyHttpClient: any;
+  let spyHttpClientGet: any;
   let spyCoreError: any;
+
+  const ORACLE_CHECKSUM = 'f'.repeat(64);
 
   beforeEach(() => {
     distribution = new OracleDistribution({
@@ -63,6 +66,14 @@ describe('findPackageForDownload', () => {
     // Mock core.error to suppress error logs
     spyCoreError = core.error as jest.Mock;
     spyCoreError.mockImplementation(() => {});
+
+    // Every resolved release fetches its `${url}.sha256` sibling checksum;
+    // stub it so tests never reach the real network.
+    spyHttpClientGet = jest.spyOn(HttpClient.prototype, 'get');
+    spyHttpClientGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => ORACLE_CHECKSUM
+    });
   });
 
   it.each([
@@ -131,6 +142,58 @@ describe('findPackageForDownload', () => {
       .replace('{{OS_TYPE}}', osType)
       .replace('{{ARCHIVE_TYPE}}', archiveType);
     expect(result.url).toBe(url);
+    // Only the `/latest/` path serves changing contents, so only it must be
+    // excluded from the resolution cache.
+    expect(result.floating).toBe(url.includes('/latest/'));
+  });
+
+  it.each([
+    ['21', 'etag:"oracle-latest"'],
+    ['21.0.1', undefined]
+  ])(
+    'fingerprints only the floating artifact for version %s',
+    async (input, expected) => {
+      spyHttpClient = jest.spyOn(HttpClient.prototype, 'head');
+      spyHttpClient.mockResolvedValue({
+        message: {statusCode: 200, headers: {etag: '"oracle-latest"'}}
+      });
+
+      const result = await distribution['findPackageForDownload'](input);
+
+      jest.restoreAllMocks();
+
+      // Without a fingerprint the constant `/latest/` URL would key a cache
+      // entry that never invalidates when Oracle republishes the artifact.
+      expect(result.fingerprint).toBe(expected);
+    }
+  );
+
+  it('fetches the authoritative sha256 checksum for the resolved archive', async () => {
+    spyHttpClient = jest.spyOn(HttpClient.prototype, 'head');
+    spyHttpClient.mockResolvedValue({message: {statusCode: 200}});
+
+    const result = await distribution['findPackageForDownload']('21');
+
+    jest.restoreAllMocks();
+
+    expect(result.checksum).toEqual({
+      algorithm: 'sha256',
+      value: ORACLE_CHECKSUM,
+      source: `${result.url}.sha256`
+    });
+    expect(spyHttpClientGet).toHaveBeenCalledWith(`${result.url}.sha256`);
+    expect(spyHttpClientGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('always resolves major-only requests remotely', () => {
+    expect(distribution['requiresRemoteResolution']()).toBe(true);
+    const exactDistribution = new OracleDistribution({
+      version: '21.0.8',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    expect(exactDistribution['requiresRemoteResolution']()).toBe(false);
   });
 
   it.each([
@@ -196,6 +259,10 @@ describe('findPackageForDownload with latest', () => {
   it('resolves the newest major version from the Adoptium API', async () => {
     spyHttpClientHead = jest.spyOn(HttpClient.prototype, 'head');
     spyHttpClientHead.mockResolvedValue({message: {statusCode: 200}});
+    jest.spyOn(HttpClient.prototype, 'get').mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => 'f'.repeat(64)
+    } as any);
 
     const distribution = new OracleDistribution({
       version: 'latest',

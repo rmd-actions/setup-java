@@ -6,6 +6,7 @@ import {
 } from '../base-models.js';
 import semver from 'semver';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getDownloadArchiveExtension,
   isVersionSatisfies,
@@ -13,7 +14,7 @@ import {
 } from '../../util.js';
 import * as core from '@actions/core';
 import {ArchitectureOptions, LibericaVersion, OsVersions} from './models.js';
-import * as tc from '@actions/tool-cache';
+import {isAlpineLinux} from '../platform-types.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -32,7 +33,7 @@ export class LibericaDistributions extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -44,7 +45,7 @@ export class LibericaDistributions extends JavaBase {
     const archiveName = fs.readdirSync(extractedJavaPath)[0];
     const archivePath = path.join(extractedJavaPath, archiveName);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       this.getToolcacheVersionName(javaRelease.version),
@@ -154,7 +155,7 @@ export class LibericaDistributions extends JavaBase {
       case 'cygwin':
         return 'windows';
       case 'linux':
-        return 'linux';
+        return isAlpineLinux(platform) ? 'linux-musl' : 'linux';
       case 'sunos':
         return 'solaris';
       default:

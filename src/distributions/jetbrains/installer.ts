@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 
 import fs from 'fs';
 import path from 'path';
@@ -12,9 +11,21 @@ import {
   JavaInstallerOptions,
   JavaInstallerResults
 } from '../base-models.js';
-import {extractJdkFile, isVersionSatisfies} from '../../util.js';
+import {
+  cacheJdkDir,
+  extractJdkFile,
+  getGitHubToken,
+  getNextPageUrlFromLinkHeader,
+  isVersionSatisfies,
+  MAX_PAGINATION_PAGES,
+  validatePaginationUrl
+} from '../../util.js';
 import {OutgoingHttpHeaders} from 'http';
 import {HttpCodes} from '@actions/http-client';
+
+const JETBRAINS_RELEASES_URL =
+  'https://api.github.com/repos/JetBrains/JetBrainsRuntime/releases?per_page=100';
+const GITHUB_API_ORIGIN = 'https://api.github.com';
 
 export class JetBrainsDistribution extends JavaBase {
   constructor(installerOptions: JavaInstallerOptions) {
@@ -50,7 +61,17 @@ export class JetBrainsDistribution extends JavaBase {
       throw this.createVersionNotFoundError(range, availableVersionStrings);
     }
 
-    return resolvedFullVersion;
+    return {
+      ...resolvedFullVersion,
+      // JetBrains' `.checksum` sibling doesn't disclose its algorithm via the
+      // filename, and older JBR builds (e.g. JBR 11) publish a SHA-256 digest
+      // there while newer builds publish SHA-512. Accept either, preferring
+      // the stronger SHA-512 when the digest length is ambiguous.
+      checksum: await this.fetchChecksum(
+        `${resolvedFullVersion.url}.checksum`,
+        ['sha512', 'sha256']
+      )
+    };
   }
 
   protected async downloadTool(
@@ -60,7 +81,7 @@ export class JetBrainsDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
 
-    const javaArchivePath = await tc.downloadTool(javaRelease.url);
+    const javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extractedJavaPath = await extractJdkFile(javaArchivePath, 'tar.gz');
@@ -69,7 +90,7 @@ export class JetBrainsDistribution extends JavaBase {
     const archivePath = path.join(extractedJavaPath, archiveName);
     const version = this.getToolcacheVersionName(javaRelease.version);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,
@@ -87,46 +108,56 @@ export class JetBrainsDistribution extends JavaBase {
       console.time('Retrieving available versions for JBR took'); // eslint-disable-line no-console
     }
 
-    // need to iterate through all pages to retrieve the list of all versions
-    // GitHub API doesn't provide way to retrieve the count of pages to iterate so infinity loop
-    let page_index = 1;
     const rawVersions: IJetBrainsRawVersion[] = [];
-    const bearerToken = process.env.GITHUB_TOKEN;
+    const bearerToken = getGitHubToken();
+    const requestHeaders: OutgoingHttpHeaders = {
+      Accept: 'application/vnd.github+json'
+    };
+    if (bearerToken) {
+      requestHeaders.Authorization = `Bearer ${bearerToken}`;
+    }
+    let releasesUrl: string | null = JETBRAINS_RELEASES_URL;
+    let pageCount = 0;
 
-    while (true) {
-      const requestArguments = `per_page=100&page=${page_index}`;
-      const requestHeaders: OutgoingHttpHeaders = {};
+    if (core.isDebug()) {
+      core.debug(`Gathering available versions from '${releasesUrl}'`);
+    }
 
-      if (bearerToken) {
-        requestHeaders['Authorization'] = `Bearer ${bearerToken}`;
-      }
-
-      const rawUrl = `https://api.github.com/repos/JetBrains/JetBrainsRuntime/releases?${requestArguments}`;
-
-      if (core.isDebug() && page_index === 1) {
-        // url is identical except page_index so print it once for debug
-        core.debug(`Gathering available versions from '${rawUrl}'`);
-      }
-
-      const paginationPageResult = (
-        await this.http.getJson<IJetBrainsRawVersion[]>(rawUrl, requestHeaders)
-      ).result;
+    while (releasesUrl) {
+      pageCount++;
+      const response = await this.http.getJson<IJetBrainsRawVersion[]>(
+        releasesUrl,
+        requestHeaders
+      );
+      const paginationPageResult = response.result;
       if (!paginationPageResult || paginationPageResult.length === 0) {
-        // break infinity loop because we have reached end of pagination
         break;
       }
 
-      const paginationPage: IJetBrainsRawVersion[] =
-        paginationPageResult.filter(version =>
+      rawVersions.push(
+        ...paginationPageResult.filter(version =>
           this.stable ? !version.prerelease : version.prerelease
+        )
+      );
+
+      const nextUrl = getNextPageUrlFromLinkHeader(response.headers);
+      if (nextUrl && !validatePaginationUrl(nextUrl, GITHUB_API_ORIGIN)) {
+        core.warning(
+          `Ignoring pagination link with unexpected origin: ${nextUrl}`
         );
-      if (!paginationPage || paginationPage.length === 0) {
-        // break infinity loop because we have reached end of pagination
-        break;
+        releasesUrl = null;
+      } else {
+        releasesUrl = nextUrl;
       }
 
-      rawVersions.push(...paginationPage);
-      page_index++;
+      if (pageCount >= MAX_PAGINATION_PAGES) {
+        if (releasesUrl) {
+          core.warning(
+            `Reached pagination safeguard limit (${MAX_PAGINATION_PAGES} pages) while listing JetBrains Runtime releases.`
+          );
+        }
+        break;
+      }
     }
 
     if (this.stable) {
