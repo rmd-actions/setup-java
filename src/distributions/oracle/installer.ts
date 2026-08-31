@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 
 import fs from 'fs';
 import path from 'path';
@@ -11,8 +10,11 @@ import {
   JavaInstallerResults
 } from '../base-models.js';
 import {
+  cacheJdkDir,
   extractJdkFile,
+  getArtifactFingerprint,
   getDownloadArchiveExtension,
+  getJavaVersionFromReleaseFile,
   getLatestMajorVersion,
   renameWinArchive
 } from '../../util.js';
@@ -32,7 +34,7 @@ export class OracleDistribution extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -43,16 +45,23 @@ export class OracleDistribution extends JavaBase {
 
     const archiveName = fs.readdirSync(extractedJavaPath)[0];
     const archivePath = path.join(extractedJavaPath, archiveName);
-    const version = this.getToolcacheVersionName(javaRelease.version);
+    const installedVersion = javaRelease.floating
+      ? getJavaVersionFromReleaseFile(archivePath)
+      : javaRelease.version;
+    const version = this.getToolcacheVersionName(installedVersion);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,
       this.architecture
     );
 
-    return {version: javaRelease.version, path: javaPath};
+    return {version: installedVersion, path: javaPath};
+  }
+
+  protected requiresRemoteResolution(): boolean {
+    return this.stable && !this.version.includes('.');
   }
 
   protected async findPackageForDownload(
@@ -99,6 +108,7 @@ export class OracleDistribution extends JavaBase {
         `${ORACLE_DL_BASE}/${major}/latest/jdk-${major}_${platform}-${arch}_bin.${extension}`
       );
     }
+    const floatingUrl = isOnlyMajorProvided ? possibleUrls[0] : undefined;
 
     possibleUrls.push(
       `${ORACLE_DL_BASE}/${major}/archive/jdk-${range}_${platform}-${arch}_bin.${extension}`
@@ -112,7 +122,16 @@ export class OracleDistribution extends JavaBase {
       const response = await this.http.head(url);
 
       if (response.message.statusCode === HttpCodes.OK) {
-        return {url, version: range};
+        const floating = url === floatingUrl;
+        return {
+          url,
+          version: range,
+          checksum: await this.fetchChecksum(`${url}.sha256`, 'sha256'),
+          floating,
+          fingerprint: floating
+            ? getArtifactFingerprint(response.message.headers)
+            : undefined
+        };
       }
 
       if (response.message.statusCode !== HttpCodes.NotFound) {

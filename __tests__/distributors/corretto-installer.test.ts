@@ -8,6 +8,7 @@ import {
   beforeAll,
   afterAll
 } from '@jest/globals';
+import fs from 'fs';
 import type {JavaInstallerOptions} from '../../src/distributions/base-models.js';
 import {HttpClient} from '@actions/http-client';
 
@@ -202,6 +203,12 @@ describe('getAvailableVersions', () => {
         await distribution['findPackageForDownload'](version);
       expect(availableVersion).not.toBeNull();
       expect(availableVersion.url).toBe(expectedLink);
+      expect(availableVersion.checksum).toEqual({
+        algorithm: 'sha256',
+        value: expect.stringMatching(/^[a-f0-9]{64}$/),
+        source:
+          'https://corretto.github.io/corretto-downloads/latest_links/indexmap_with_checksum.json'
+      });
     });
 
     it('with latest resolves to the newest available major version', async () => {
@@ -293,6 +300,19 @@ describe('getAvailableVersions', () => {
         expect(availableVersion.url).toBe(expectedLink);
       }
     );
+
+    it('keeps the canonical ARM runner value separate from the vendor value', () => {
+      jest.spyOn(os, 'arch').mockReturnValue('arm');
+      const distribution = new CorrettoDistribution({
+        version: '11',
+        architecture: '',
+        packageType: 'jdk',
+        checkLatest: false
+      });
+
+      expect(distribution['architecture']).toBe('armv7');
+      expect(distribution['distributionArchitecture']()).toBe('arm');
+    });
   });
 
   const mockPlatform = (
@@ -303,4 +323,51 @@ describe('getAvailableVersions', () => {
     const mockedExtension = platform === 'windows' ? 'zip' : 'tar.gz';
     spyGetDownloadArchiveExtension.mockReturnValue(mockedExtension);
   };
+});
+
+describe('Corretto getPlatformOption libc selection', () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(
+    process,
+    'platform'
+  ) as PropertyDescriptor;
+
+  const setPlatform = (platform: NodeJS.Platform) =>
+    Object.defineProperty(process, 'platform', {
+      ...originalPlatform,
+      value: platform
+    });
+
+  const distribution = new CorrettoDistribution({
+    version: '21',
+    architecture: 'x64',
+    packageType: 'jdk',
+    checkLatest: false
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    jest.restoreAllMocks();
+  });
+
+  it('selects the musl artifacts on Alpine', () => {
+    setPlatform('linux');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+
+    expect(distribution['getPlatformOption']()).toBe('alpine');
+  });
+
+  it('selects the glibc artifacts on other Linux runners', () => {
+    setPlatform('linux');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    expect(distribution['getPlatformOption']()).toBe('linux');
+  });
+
+  it('does not probe for Alpine off Linux', () => {
+    setPlatform('darwin');
+    const existsSync = jest.spyOn(fs, 'existsSync');
+
+    expect(distribution['getPlatformOption']()).toBe('macos');
+    expect(existsSync).not.toHaveBeenCalled();
+  });
 });
