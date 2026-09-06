@@ -5,13 +5,14 @@ import {
   JavaInstallerResults
 } from '../base-models.js';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getDownloadArchiveExtension,
-  getGitHubHttpHeaders,
   renameWinArchive
 } from '../../util.js';
 import * as gpg from '../../gpg.js';
 import {MICROSOFT_PUBLIC_KEY} from './microsoft-key.js';
+import {SIGNATURE_VERIFICATION_FAILURE_HELP} from '../../constants.js';
 import * as core from '@actions/core';
 import * as tc from '@actions/tool-cache';
 import fs from 'fs';
@@ -31,25 +32,34 @@ export class MicrosoftDistributions extends JavaBase {
     core.info(
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
-    let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
     if (this.verifySignature) {
-      if (!javaRelease.signatureUrl) {
-        throw new Error(
-          `Input 'verify-signature' is enabled, but no signature URL was found for Microsoft Build of OpenJDK version ${javaRelease.version}.`
-        );
-      }
-      core.info(`Verifying Java package signature...`);
       try {
-        await gpg.verifyPackageSignature(
-          javaArchivePath,
-          javaRelease.signatureUrl,
-          this.verifySignaturePublicKey ?? MICROSOFT_PUBLIC_KEY
-        );
+        if (!javaRelease.signatureUrl) {
+          throw new Error(
+            `Input 'verify-signature' is enabled, but no signature URL was found for Microsoft Build of OpenJDK version ${javaRelease.version}.`
+          );
+        }
+        core.info(`Verifying Java package signature...`);
+        try {
+          await gpg.verifyPackageSignature(
+            javaArchivePath,
+            javaRelease.signatureUrl,
+            this.verifySignaturePublicKey ?? MICROSOFT_PUBLIC_KEY
+          );
+        } catch (error) {
+          throw new Error(
+            `Failed to verify signature for Microsoft Build of OpenJDK version ${javaRelease.version}. Signature URL: ${javaRelease.signatureUrl}. Error: ${(error as Error).message} ${SIGNATURE_VERIFICATION_FAILURE_HELP}`,
+            {cause: error}
+          );
+        }
       } catch (error) {
-        throw new Error(
-          `Failed to verify signature for Microsoft Build of OpenJDK version ${javaRelease.version}. Signature URL: ${javaRelease.signatureUrl}. Error: ${(error as Error).message}`,
-          {cause: error}
+        if (this.verifySignatureExplicitlyRequested) {
+          throw error;
+        }
+        core.warning(
+          error instanceof Error ? error.message : `Unknown error: ${error}`
         );
       }
     }
@@ -64,7 +74,7 @@ export class MicrosoftDistributions extends JavaBase {
     const archiveName = fs.readdirSync(extractedJavaPath)[0];
     const archivePath = path.join(extractedJavaPath, archiveName);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       this.getToolcacheVersionName(javaRelease.version),
@@ -114,7 +124,11 @@ export class MicrosoftDistributions extends JavaBase {
     return {
       url: file.download_url,
       signatureUrl,
-      version: foundRelease.version
+      version: foundRelease.version,
+      checksum: await this.fetchChecksum(
+        `${file.download_url}.sha256sum.txt`,
+        'sha256'
+      )
     };
   }
 
@@ -123,19 +137,11 @@ export class MicrosoftDistributions extends JavaBase {
   }
 
   private async getAvailableVersions(): Promise<tc.IToolRelease[] | null> {
-    // TODO get these dynamically!
-    // We will need Microsoft to add an endpoint where we can query for versions.
-    const owner = 'actions';
-    const repository = 'setup-java';
-    const branch = 'main';
-    const filePath =
-      'src/distributions/microsoft/microsoft-openjdk-versions.json';
-
     let releases: tc.IToolRelease[] | null = null;
-    const fileUrl = `https://api.github.com/repos/${owner}/${repository}/contents/${filePath}?ref=${branch}`;
+    const fileUrl = `https://aka.ms/download-jdk/microsoft-openjdk-versions.json`;
 
-    const headers = getGitHubHttpHeaders();
-
+    // Avoid leaking the GitHub token to a non-GitHub host (aka.ms redirects to a CDN).
+    const headers = {accept: 'application/json'};
     let response: TypedResponse<tc.IToolRelease[]> | null = null;
 
     if (core.isDebug()) {

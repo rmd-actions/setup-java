@@ -1,13 +1,14 @@
 # Usage
 - [Selecting a Java distribution](#Selecting-a-Java-distribution)
   - [Eclipse Temurin](#Eclipse-Temurin)
-  - [Adopt](#Adopt)
   - [Zulu](#Zulu)
   - [Liberica](#Liberica)
   - [Liberica Native Image Kit](#Liberica-Native-Image-Kit)
   - [Microsoft](#Microsoft)
+  - [IBM Semeru](#IBM-Semeru)
   - [Amazon Corretto](#Amazon-Corretto)
   - [Oracle](#Oracle)
+  - [Oracle OpenJDK](#Oracle-OpenJDK)
   - [Alibaba Dragonwell](#Alibaba-Dragonwell)
   - [SapMachine](#SapMachine)
   - [GraalVM](#GraalVM)
@@ -15,15 +16,21 @@
   - [JetBrains](#JetBrains)
   - [Tencent Kona](#Tencent-Kona)
 - [Installing custom Java package type](#Installing-custom-Java-package-type)
+  - [Package compatibility](#Package-compatibility)
   - [JavaFX Maven project](#JavaFX-Maven-project)
 - [Ensuring the Maven cache is complete (plugin dependencies)](#ensuring-the-maven-cache-is-complete-plugin-dependencies)
+- [Caching JDK installations](#caching-jdk-installations)
+- [Platform and architecture compatibility](#platform-and-architecture-compatibility)
 - [Installing custom Java architecture](#Installing-custom-Java-architecture)
 - [Installing JDK without setting as default](#Installing-JDK-without-setting-as-default)
 - [Installing custom Java distribution from local file](#Installing-Java-from-local-file)
 - [Testing against different Java distributions](#Testing-against-different-Java-distributions)
 - [Testing against different platforms](#Testing-against-different-platforms)
 - [Publishing using Apache Maven](#Publishing-using-Apache-Maven)
+- [Publishing to multiple Maven servers](#publishing-to-multiple-maven-servers)
+- [Apache Maven with a settings path](#apache-maven-with-a-settings-path)
 - [Maven transfer progress (download logs)](#Maven-transfer-progress-download-logs)
+- [Java problem matcher (compiler annotations)](#java-problem-matcher-compiler-annotations)
 - [Publishing using Gradle](#Publishing-using-Gradle)
 - [Hosted Tool Cache](#Hosted-Tool-Cache)
 - [Modifying Maven Toolchains](#Modifying-Maven-Toolchains)
@@ -33,7 +40,7 @@
 See [action.yml](../action.yml) for more details on task inputs.
 
 ## Selecting a Java distribution
-Inputs `java-version` and `distribution` are mandatory and needs to be provided. See [Supported distributions](../README.md#Supported-distributions) for a list of available options.
+`java-version` and `distribution` select what gets installed. `java-version` may be replaced by `java-version-file`, and `distribution` is optional only when `java-version-file` points to a `.sdkmanrc` or `.tool-versions` file that carries a recognized vendor identifier. In every other case both inputs must be provided. See [Supported distributions](../README.md#Supported-distributions) for a list of available options.
 
 ### Eclipse Temurin
 
@@ -44,19 +51,7 @@ steps:
     with:
       distribution: 'temurin'
       java-version: '25'
-  - run: java --version
-```
-
-### Adopt
-**NOTE:** Adopt OpenJDK got moved to Eclipse Temurin and won't be updated anymore. It is highly recommended to migrate workflows from `adopt` to `temurin` to keep receiving software and security updates. See more details in the [Good-bye AdoptOpenJDK post](https://blog.adoptopenjdk.net/2021/08/goodbye-adoptopenjdk-hello-adoptium/).
-
-```yaml
-steps:
-  - uses: actions/checkout@v7
-  - uses: actions/setup-java@v6
-    with:
-      distribution: 'adopt-hotspot'
-      java-version: '11'
+      java-package: 'jdk+jmods' # optional, includes JMOD files with JDK 24 and later
   - run: java --version
 ```
 
@@ -70,6 +65,19 @@ steps:
       distribution: 'zulu'
       java-version: '25'
       java-package: jdk # optional (jdk, jre, jdk+fx, jre+fx, jdk+crac, or jre+crac) - defaults to jdk
+  - run: java --version
+```
+
+### Red Hat Build of OpenJDK
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'redhat'
+      java-version: '21'
+      java-package: jdk # optional (jdk or jre) - defaults to jdk
   - run: java --version
 ```
 
@@ -128,6 +136,20 @@ with:
 
 If the runner is not able to access github.com, any Java versions requested during a workflow run must come from the runner's tool cache. See "[Setting up the tool cache on self-hosted runners without internet access](https://docs.github.com/en/enterprise-server@3.2/admin/github-actions/managing-access-to-actions-from-githubcom/setting-up-the-tool-cache-on-self-hosted-runners-without-internet-access)" for more information.
 
+### IBM Semeru
+**NOTE:** IBM Semeru Runtime Open Edition provides OpenJ9-based builds. Stable releases only; `jdk` and `jre` packages are available.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'semeru'
+      java-version: '21'
+      java-package: jdk # optional (jdk or jre) - defaults to jdk
+  - run: java --version
+```
+
 ### Amazon Corretto
 **NOTE:** Amazon Corretto only supports the major version specification.
 
@@ -153,6 +175,21 @@ steps:
       java-version: '25'
   - run: java --version
 ```
+
+### Oracle OpenJDK
+Oracle OpenJDK builds are created and hosted by Oracle under GPLv2+CE. To install the latest early-access build for a feature release, append `-ea` to the Java version:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'oracle-openjdk'
+      java-version: '27-ea'
+  - run: java --version
+```
+
+Using `27` without the `-ea` suffix selects a stable (GA) release. Oracle archives OpenJDK builds after a limited number of releases and no longer provides security updates for them. To continue receiving security patches, move to Oracle JDK or choose a different vendor.
 
 ### Alibaba Dragonwell
 **NOTE:** Alibaba Dragonwell only provides jdk.
@@ -266,14 +303,56 @@ steps:
 ```
 
 ## Installing custom Java package type
+
+The `java-package` input selects the vendor artifact to install. It defaults to
+`jdk`. Package availability is a combination of distribution, Java version,
+operating system, and architecture; a package listed below can still be absent
+for a particular platform or patch release. Unless a fixed version range is
+called out, `setup-java` queries the distribution's catalog and installs the
+newest artifact matching `java-version`.
+
+The package types have these meanings:
+
+- `jdk` and `jre` select a development kit or runtime image, respectively.
+- `+fx` selects a vendor bundle that includes JavaFX.
+- `+crac` selects an Azul Zulu build with CRaC support.
+- `+jmods` installs the Temurin JDK and adds its separately published JMOD
+  archive when the JDK does not already contain a `jmods` directory.
+- `+jcef` and `+ft` select JetBrains Runtime bundles with JCEF or FreeType.
+
+### Package compatibility
+
+| Distribution | Supported `java-package` values | Version support and important details |
+| --- | --- | --- |
+| `temurin` | `jdk`, `jre`, `jdk+jmods` | `jdk` and `jre` follow the Adoptium catalog. `jdk+jmods` is available for Java 24 and later and resolves both artifacts at the exact same Java version. |
+| `zulu` | `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac` | Standard JDK builds go back to Java 6; JRE and JavaFX bundles start at Java 8. The vendor catalog has gaps among older non-LTS releases. CRaC bundles start at Java 17 and have more limited OS and architecture availability. |
+| `liberica` | `jdk`, `jre`, `jdk+fx`, `jre+fx` | Standard JDK builds go back to Java 8 in the supported action catalog; JRE and JavaFX "full" bundles also start at Java 8. Exact versions follow BellSoft's catalog for the requested platform. |
+| `liberica-nik` | `jdk`, `jdk+fx` | `java-version` selects the embedded JDK version, not the NIK/GraalVM release number. BellSoft currently publishes matching standard and JavaFX "full" bundles for JDK 11 and later, with gaps between feature releases. Any other `java-package` value is rejected. |
+| `microsoft` | `jdk` | Stable builds only. The bundled manifest contains Java 11, 16, 17, 21, and 25 releases; platform availability varies by release. |
+| `semeru` | `jdk`, `jre` | Stable OpenJ9 builds only. IBM publishes both image types for the supported release lines (currently 8, 11, 17, 21, and 25), subject to platform availability. |
+| `corretto` | `jdk`, `jre` | Accepts major versions only. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
+| `oracle` | `jdk` | Stable Oracle JDK 17 and later only. |
+| `oracle-openjdk` | `jdk` | Installs the GA or early-access JDK builds currently listed or archived on `jdk.java.net`; use a `-ea` version such as `27-ea` for early access. |
+| `redhat` | `jdk`, `jre` | Stable builds only. Version availability follows the Foojay Disco catalog for Red Hat Build of OpenJDK and can lag Red Hat's downloads page. |
+| `dragonwell` | `jdk` | Stable builds only. The current vendor catalog provides Java 8, 11, 17, 21, and 25. |
+| `sapmachine` | `jdk`, `jre` | Follows the SapMachine catalog. Both editions are represented from Java 10 onward, but individual versions and platforms can differ. |
+| `graalvm` | `jdk` | Stable Oracle GraalVM for JDK 17 and later only. |
+| `graalvm-community` | `jdk` | Stable GraalVM Community releases for JDK 17 and later only. |
+| `jetbrains` | `jdk`, `jre`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, `jre+ft` | JetBrains publishes selected LTS-based releases rather than every OpenJDK patch. JDK/JRE and JCEF bundles start with the Java 11 release family; FreeType bundles start with Java 17. Exact package, LTS family, patch, OS, and architecture availability is determined from release assets. |
+| `kona` | `jdk` | Stable Java 8, 11, 17, 21, and 25 releases only. |
+| `jdkfile` | `jdk` | The package contents and version are supplied by `jdk-file`; `setup-java` validates the package type but does not inspect the archive contents. |
+
+Values outside this table are unsupported. The action rejects them before
+checking the tool cache or requesting a vendor catalog.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
   - uses: actions/setup-java@v6
     with:
-      distribution: '<distribution>'
-      java-version: '25'
-      java-package: jdk # optional (jdk or jre) - defaults to jdk
+      distribution: 'semeru'
+      java-version: '21'
+      java-package: jre
   - run: java --version
 ```
 
@@ -424,6 +503,173 @@ jobs:
 > which provides purpose-built caching (see the
 > [setup-gradle documentation](https://github.com/gradle/actions/blob/main/docs/setup-gradle.md)).
 
+## Caching JDK installations
+
+`cache-jdk` controls caching for downloaded JDK installations. The JDK cache is
+stored and restored as its own cache entry, separate from the dependency and
+build-tool wrapper caches selected by `cache`. Whether it is *enabled*, however,
+is coupled to `cache`: setting `cache` turns JDK caching on as well, unless
+`cache-jdk` is set explicitly.
+
+| `cache` | `cache-jdk` | Dependency and wrapper caches | JDK cache |
+| --- | --- | --- | --- |
+| Omitted | Omitted | Disabled | Disabled |
+| Omitted | `true` | Disabled | Enabled |
+| Omitted | `false` | Disabled | Disabled |
+| Set | Omitted | Enabled | Enabled |
+| Set | `true` | Enabled | Enabled |
+| Set | `false` | Enabled | Disabled |
+
+JDK entries are specific to the runner operating system and normalized
+architecture. They are additionally separated by distribution, package type,
+exact resolved Java version, release identity, and signature-verification
+identity. The release identity is the authoritative checksum when available and
+otherwise the download URL without its query string. These dimensions prevent
+incompatible JDKs from sharing an entry. They also mean that a matrix or workflow
+using multiple JDK versions, distributions, package types, architectures, or
+operating systems stores a separate JDK entry for each identity and consumes
+cache storage for each one.
+
+For `distribution: jdkfile`, the release source is a SHA-256 hash of the local
+`jdk-file` contents, streamed so the archive is not held in memory. Changing the
+archive therefore creates a different JDK cache entry, even when its path and
+requested version are unchanged. The archive is only read when the runner tool
+cache holds no installation satisfying the requested version: a matching
+tool-cache installation short-circuits setup, so a changed `jdk-file` is not
+re-extracted for a version that is already installed. Use
+`force-download: true` when the archive contents change but the version does not.
+
+The verification identity separates requests that disable signature verification,
+check and warn without enforcement, or explicitly enforce verification. Disabled
+and check-and-warn requests have the same non-enforcement guarantee, but they are
+kept separate so an entry downloaded with verification disabled cannot prevent a
+later check-and-warn request from attempting verification. The identity also
+separates the distribution's bundled signing keys from custom keys. Custom
+public-key sets are represented by a SHA-256 fingerprint of normalized,
+boundary-delimited key material; the keys themselves are not placed in the cache
+key, the logs, or action state. Enforced requests only restore entries created by
+an enforced request whose signature verification succeeded. Check-and-warn entries
+may have been saved after verification succeeded or after a verification failure
+was reported as a warning.
+
+For signature-verification defaults, enforced failure behavior, and recovery from
+a legitimate vendor signing-key rotation, see
+[Download integrity and signatures](../README.md#download-integrity-and-signatures).
+
+> [!IMPORTANT]
+> The JDK cache **key** isolates disabled, check-and-warn, and enforced verification
+> modes as well as release identity. A check-and-warn entry can never be restored
+> for a request that sets `verify-signature: true`, and vice versa.
+> `cache-jdk` does not change how the runner tool cache is used. setup-java
+> first looks for an installation in the runner tool cache — a preinstalled
+> JDK, or one installed by an earlier step of the same job — and uses it as-is. Such an installation is not downloaded again, and its checksum
+> and signature are not reverified, even when `verify-signature: true` is set,
+> because its verification history is not recorded in the tool cache. Use
+> `force-download: true` for a request that must download and verify the archive
+> itself.
+
+`check-latest: true` and `java-version: latest` resolve remote metadata before
+looking up the exact resolved JDK entry. `force-download: true` bypasses both the
+runner tool cache and JDK cache restore, but an enabled JDK cache still records
+the downloaded installation for a post-job save. `cache-read-only: true` allows
+restores but suppresses post-job saves for JDK, dependency, and wrapper caches.
+
+If the cache service fails to restore an entry, or the restored entry lacks the
+expected completed tool-cache path, setup continues by downloading the JDK.
+Post-job saves are best-effort and do not fail the job: cache keys are immutable,
+so an existing key or a concurrent job winning the save race is left unchanged,
+and a failure to save one JDK entry is reported as a warning without preventing
+the remaining entries from being saved.
+
+A key is only ever populated with the installation it was computed for. Because
+tool-cache paths are shared per version and architecture, a later step — for
+example one using `force-download: true` — can replace the installation an
+earlier step registered. setup-java detects that replacement in the post-job
+step and skips the save with a warning, so a key is never saved with content
+other than the installation it identifies. This guarantee holds without
+rehashing hundreds of megabytes of JDK content on every job.
+
+### Caching release resolution
+
+Only Temurin is preinstalled in the runner tool cache, so for every other
+distribution setup-java has to ask the distribution's metadata API which release
+satisfies `java-version` before it can look up a JDK cache entry. That makes the
+vendor API a dependency of every job, even one whose JDK is already cached.
+
+When JDK caching is enabled, setup-java also stores the resolved release itself
+in a small companion cache entry, keyed on the runner operating system,
+architecture, distribution, package type, requested version, and stability. A job
+that finds a current entry installs the JDK without contacting the distribution's
+metadata API at all.
+
+Entries carry the seven-day window they were resolved in. An entry from an
+earlier window is not used directly: setup-java still queries the metadata API,
+so a floating request such as `java-version: 21` keeps picking up new releases.
+The older entry is used only when that query fails, which keeps a job working
+through a vendor outage or rate limit. Because the entry also holds the download
+URL and checksum, this fallback works even when the JDK itself is not cached and
+still has to be downloaded. When the fallback is used, setup-java reports it with
+a warning.
+
+Seven days is deliberate. GitHub removes cache entries that have not been
+accessed for seven days, so a longer window would mean the previous entry is
+already evicted by the time the window rolls over, leaving no fallback at the
+moment one is most likely to be needed. It also comfortably covers JDK release
+cadence, which is monthly at its fastest and usually quarterly, and it means a
+repository whose workflows run infrequently still benefits. Use
+`check-latest: true` for a workflow that must resolve the newest release on every
+run.
+
+Restored entries are validated before use: the download URL and any signature URL
+must be well-formed HTTPS URLs and the checksum must use a supported algorithm.
+An entry that fails validation is ignored and the metadata API is queried
+instead. `check-latest: true`, `java-version: latest`, and `force-download: true`
+always query the metadata API and never read or write these entries.
+
+Releases whose download URL is not content-addressed are never stored. Oracle JDK
+and Oracle GraalVM build a `/latest/` URL when `java-version` names only a major
+version, and the bytes behind that URL change whenever a new build is published,
+so its URL and checksum are only consistent with each other at the moment they
+are resolved. Requesting a more specific version, such as `java-version: 21.0.2`,
+resolves an archived URL that is stored normally.
+
+JDK caching trades cache storage and cold-run save work for faster warm setup.
+A warm run restores the installed JDK instead of downloading, verifying, and
+extracting it, while the first run pays to upload it and every cached identity
+consumes repository cache storage. How much time this saves depends on the
+runner, distribution, JDK size, network, and cache eviction pressure.
+
+## Platform and architecture compatibility
+
+The `architecture` input is normalized before setup-java checks the tool cache
+or contacts a vendor. `amd64`, `ia32`, `arm`, and `arm64` are accepted aliases
+for `x64`, `x86`, `armv7`, and `aarch64`. The table lists the combinations
+setup-java validates up front; an individual Java patch release can still be
+absent from a vendor catalog.
+
+| Distribution | Linux | macOS | Windows | Other / version restrictions |
+| --- | --- | --- | --- | --- |
+| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
+| `zulu` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | |
+| `liberica` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Solaris: `x64`. |
+| `liberica-nik` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `microsoft` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `semeru` | `x64`, `x86`, `ppc64le`, `ppc64`, `s390x`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `corretto` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86` | `x86` is limited to Java 11 or earlier; Linux `armv7` is available for Java 11. |
+| `oracle` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `oracle-openjdk` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `redhat` | `x64`, `aarch64`, `ppc64le` | — | `x64`, `x86` | Linux requires glibc; Alpine is unsupported. Linux `aarch64` and `ppc64le` are limited to Java 11 or earlier. Windows `x64` is limited to Java 21 or earlier and `x86` to Java 10 or earlier. |
+| `dragonwell` | `x64`, `aarch64` | — | `x64` | |
+| `sapmachine` | `x64`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `graalvm`, `graalvm-community` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `jetbrains` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
+| `kona` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `jdkfile` | Any | Any | Any | Local archives are not restricted because setup-java does not inspect their contents. |
+
+Unsupported combinations fail with a platform-capability error before a cache
+lookup or vendor request. A supported combination can still produce a
+version-not-found error when the requested release was not published.
+
 ## Installing custom Java architecture
 
 ```yaml
@@ -469,12 +715,12 @@ In this example, `JAVA_HOME` and `java` on `PATH` point to Java 17, while Java 2
 If your use-case requires a custom distribution or a version that is not provided by setup-java, you can download it manually and setup-java will take care of the installation and caching on the VM:
 
 > [!NOTE]
-> This approach also lets you use builds that setup-java does not provide directly, such as **Early Access (EA)** or other unreleased JDK builds (for example, an upcoming feature release or a Loom/Valhalla preview build). Download the desired archive in a prior step and point `jdk-file` at it; setup-java will extract, install, and cache it just like a supported distribution. When targeting multiple architectures, select the correct binary per architecture in your workflow (for example, with a build matrix).
+> This approach also lets you use builds that setup-java does not provide directly, such as unreleased Loom/Valhalla preview builds or early-access builds not exposed by a supported distribution. Download the desired archive in a prior step and point `jdk-file` at it; setup-java will extract, install, and cache it just like a supported distribution. When targeting multiple architectures, select the correct binary per architecture in your workflow (for example, with a build matrix).
 
 ```yaml
 steps:
   - run: |
-      download_url="https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.10%2B9/OpenJDK11U-jdk_x64_linux_hotspot_11.0.10_9.tar.gz"
+      download_url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.12%2B7/OpenJDK11U-jdk_x64_linux_hotspot_11.0.12_7.tar.gz"
       wget -O $RUNNER_TEMP/java_package.tar.gz $download_url
   - uses: actions/setup-java@v6
     with:
@@ -483,23 +729,6 @@ steps:
       java-version: '11.0.0'
       architecture: x64
     
-  - run: java --version
-```
-
-For example, to use an **Early Access** build from [jdk.java.net](https://jdk.java.net/), download the archive for your runner OS/architecture and install it via `distribution: 'jdkfile'` (example below assumes Linux x64):
-
-```yaml
-steps:
-  - run: |
-      download_url="https://download.java.net/java/early_access/jdk25/36/GPL/openjdk-25-ea+36_linux-x64_bin.tar.gz"
-      wget -O $RUNNER_TEMP/java_package.tar.gz $download_url
-  - uses: actions/setup-java@v6
-    with:
-      distribution: 'jdkfile'
-      jdk-file: ${{ runner.temp }}/java_package.tar.gz
-      java-version: '25.0.0-ea.36'
-      architecture: x64
-
   - run: java --version
 ```
 
@@ -533,7 +762,7 @@ steps:
 ```yaml
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         distribution: [ 'zulu', 'temurin' ]
@@ -549,7 +778,7 @@ jobs:
       - run: java --version
 ```
 
-#### Testing against different platforms
+## Testing against different platforms
 ```yaml
 jobs:
   build:
@@ -650,6 +879,125 @@ The two `settings.xml` files created from the above example look like the follow
 
 If you don't want to overwrite the `settings.xml` file, you can set `overwrite-settings: false`
 
+### Publishing to multiple Maven servers
+
+Use `mvn-server-credentials` to add more than one credential entry to the generated `settings.xml`. Each line has the format `server-id:USERNAME_ENV:PASSWORD_ENV`. The username and password fields are environment variable names, not credential values.
+
+When this input is set, it replaces the single server configured by `server-id`, `server-username-env-var`, and `server-password-env-var`.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - name: Set up release and snapshot repositories
+    uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        releases:RELEASES_USERNAME:RELEASES_PASSWORD
+        snapshots:SNAPSHOTS_USERNAME:SNAPSHOTS_PASSWORD
+  - name: Publish with Maven
+    run: mvn deploy
+    env:
+      RELEASES_USERNAME: ${{ secrets.RELEASES_USERNAME }}
+      RELEASES_PASSWORD: ${{ secrets.RELEASES_PASSWORD }}
+      SNAPSHOTS_USERNAME: ${{ secrets.SNAPSHOTS_USERNAME }}
+      SNAPSHOTS_PASSWORD: ${{ secrets.SNAPSHOTS_PASSWORD }}
+```
+
+This configuration produces the following server entries:
+
+```xml
+<servers>
+  <server>
+    <id>releases</id>
+    <username>${env.RELEASES_USERNAME}</username>
+    <password>${env.RELEASES_PASSWORD}</password>
+  </server>
+  <server>
+    <id>snapshots</id>
+    <username>${env.SNAPSHOTS_USERNAME}</username>
+    <password>${env.SNAPSHOTS_PASSWORD}</password>
+  </server>
+</servers>
+```
+
+### Resolving Maven dependencies from custom repositories
+
+Use `mvn-repositories` when Maven must download dependencies from repositories
+outside Maven Central. Each line has the format
+`repository-id:repository-url:snapshots-enabled`. The parser uses the first and
+last colons as separators, so repository URLs can contain a scheme or port.
+
+The repository ID can match a `mvn-server-credentials` server ID to authenticate
+requests to a private repository:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - name: Set up Java and private Maven repositories
+    uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        private:PRIVATE_REPOSITORY_USERNAME:PRIVATE_REPOSITORY_TOKEN
+      mvn-repositories: |
+        private:https://maven.example.com:8443/releases:false
+        snapshots:https://maven.example.com:8443/snapshots:true
+      mvn-repositories-include-central: true
+      mvn-repositories-prioritize-central: true
+  - run: mvn --batch-mode verify
+    env:
+      PRIVATE_REPOSITORY_USERNAME: ${{ secrets.PRIVATE_REPOSITORY_USERNAME }}
+      PRIVATE_REPOSITORY_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+```
+
+This configuration adds the following active profile to `settings.xml`:
+
+```xml
+<profiles>
+  <profile>
+    <id>setup-java-repositories</id>
+    <repositories>
+      <repository>
+        <id>central</id>
+        <url>https://repo.maven.apache.org/maven2</url>
+        <snapshots>
+          <enabled>false</enabled>
+        </snapshots>
+      </repository>
+      <repository>
+        <id>private</id>
+        <url>https://maven.example.com:8443/releases</url>
+        <snapshots>
+          <enabled>false</enabled>
+        </snapshots>
+      </repository>
+      <repository>
+        <id>snapshots</id>
+        <url>https://maven.example.com:8443/snapshots</url>
+        <snapshots>
+          <enabled>true</enabled>
+        </snapshots>
+      </repository>
+    </repositories>
+  </profile>
+</profiles>
+<activeProfiles>
+  <activeProfile>setup-java-repositories</activeProfile>
+</activeProfiles>
+```
+
+Maven Central is included first by default. Set
+`mvn-repositories-prioritize-central: false` to place custom repositories
+first, or set `mvn-repositories-include-central: false` to disable Central. The
+generated profile overrides the Central repository inherited from Maven's Super
+POM with releases and snapshots disabled. When automatic Central inclusion is
+off, the ID `central` may instead be declared explicitly in `mvn-repositories`
+to replace it with a user-specified repository; otherwise that ID is reserved
+to prevent duplicate entries.
+
 ### GPG
 
 The example above uses the [Maven GPG Plugin](https://maven.apache.org/plugins/maven-gpg-plugin/)'s Bouncy Castle signer (`-Dgpg.signer=bc`, available since `maven-gpg-plugin` 3.2.0). It is a pure-Java signer that reads the key directly from the `MAVEN_GPG_KEY` environment variable, so it does **not** require the `gpg` executable, importing the key into a GPG keychain, or the `--pinentry-mode loopback` workaround in your `pom.xml`. The key must be an ASCII-armored secret key (transferable secret key format).
@@ -660,7 +1008,7 @@ See the help docs on [Publishing a Package](https://help.github.com/en/github/ma
 
 #### Legacy / alternative: let setup-java import the key
 
-If you prefer signing with the `gpg` executable (for example because you are using `maven-gpg-plugin` older than 3.2.0), you can let setup-java import the key instead by providing the `gpg-private-key` and `gpg-passphrase-env-var` inputs. The private key is written to a file in the runner's temp directory, imported into the GPG keychain, and the file is promptly removed before proceeding with the rest of the setup process. A cleanup step removes the imported private key from the GPG keychain after the job completes regardless of the job status. This ensures that the private key is no longer accessible on self-hosted runners and cannot "leak" between jobs (hosted runners are always clean instances).
+If you prefer signing with the `gpg` executable (for example because you are using `maven-gpg-plugin` older than 3.2.0), you can let setup-java import the key instead by providing the `gpg-private-key` and `gpg-passphrase-env-var` inputs. setup-java creates a uniquely named, permission-restricted GPG home in the runner's temp directory, imports the key only into that isolated keyring, and exports `GNUPGHOME` for subsequent Maven and GPG commands. The temporary key file is permission-restricted and removed whether the import succeeds or fails. A cleanup step removes the complete action-owned GPG home after the job regardless of job status, without modifying the runner user's default keyring. Each setup-java invocation owns a separate keyring, including on persistent self-hosted runners.
 
 setup-java imports the key independently of the plugin version, but the generated passphrase profile described below uses `gpg.passphraseEnvName`, which requires `maven-gpg-plugin` 3.2.0 or newer. Since `gpg-passphrase-env-var` defaults to `GPG_PASSPHRASE`, setup-java writes that profile unless you override the input to `MAVEN_GPG_PASSPHRASE`.
 
@@ -847,9 +1195,9 @@ See the help docs on [Publishing a Package with Gradle](https://help.github.com/
 ## Hosted Tool Cache
 GitHub Hosted Runners have a tool cache that comes with some Java versions pre-installed. This tool cache helps speed up runs and tool setup by not requiring any new downloads. There is an environment variable called `RUNNER_TOOL_CACHE` on each runner that describes the location of this tools cache and this is where you can find the pre-installed versions of Java. `setup-java` works by taking a specific version of Java in this tool cache and adding it to PATH if the version, architecture and distribution match.
 
-Currently, LTS versions of Eclipse Temurin (`temurin`) are cached on the GitHub Hosted Runners.
+Currently, LTS versions of Eclipse Temurin (`temurin`) are cached on GitHub-hosted runners. Using a cached version avoids downloading a JDK.
 
-The tools cache gets updated on a weekly basis. For information regarding locally cached versions of Java on GitHub hosted runners, check out [GitHub Actions Virtual Environments](https://github.com/actions/virtual-environments).
+The tools cache gets updated on a weekly basis. See the installed Java versions for [Ubuntu](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#java), [Windows](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md#java), and [macOS](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#java).
 
 ## Modifying Maven Toolchains
 The `setup-java` action generates a basic [Maven Toolchains declaration](https://maven.apache.org/guides/mini/guide-using-toolchains.html) for specified Java versions by either creating a minimal toolchains file or extending an existing declaration with the additional JDKs.
@@ -888,7 +1236,7 @@ The result is a Toolchain with entries for JDKs 8, 11 and 15. You can even combi
     architecture: x64
 ```
 
-This will generate a Toolchains entry with the following values: `version: 1.6`, `vendor: jdkfile`, `id: Oracle_1.6`.
+This will generate a Toolchains entry with the following values: `version: 1.6`, `vendor: jdkfile`, `id: jdkfile_1.6`.
 
 ### Modifying The Toolchain Vendor For JDKs
 Each JDK provider will receive a default `vendor` using the `distribution` input value but this can be overridden with the `mvn-toolchain-vendor` parameter as follows.
@@ -922,7 +1270,7 @@ steps:
 ```
 
 ### Modifying The Toolchain ID For JDKs
-Each JDK provider will receive a default `id` based on the combination of `distribution` and `java-version` in the format of `distribution_java-version` (e.g. `temurin_11`) but this can be overridden with the `mvn-toolchain-id` parameter as follows.
+Each JDK provider will receive a default `id` based on the combination of the toolchain vendor and `java-version` in the format of `vendor_java-version` (e.g. `temurin_11`). The vendor defaults to the `distribution` input, so overriding `mvn-toolchain-vendor` also changes the generated default `id`. Set `mvn-toolchain-id` to override the `id` directly.
 
 ```yaml
 steps:
@@ -935,7 +1283,7 @@ steps:
   - run: java --version
 ```
 
-In case you install multiple versions of Java at once you can use the same syntax as used in `java-versions`. Please note that you have to declare an ID for all Java versions that will be installed or the `mvn-toolchain-id` instruction will be skipped wholesale due to mapping ambiguities.
+When installing multiple Java versions, use the same multiline syntax as `java-version`. You must declare exactly one ID for every Java version that will be installed. The action fails before installing a JDK unless the number of `mvn-toolchain-id` entries matches the number of `java-version` entries, or is exactly one when `java-version-file` is used.
 
 ```yaml
 steps:
@@ -1087,7 +1435,7 @@ On **GitHub Enterprise Server**, traffic from your runners frequently passes thr
 
 ### Security warning: do not disable certificate verification
 
-Do **not** work around this error by disabling TLS verification (for example, by setting `NODE_TLS_REJECT_UNAUTHORIZED=0`). `setup-java` does not verify a pinned checksum or signature of the downloaded archive, so **TLS is effectively the only integrity guarantee** on the JDK download. Disabling verification would expose your workflow to a man-in-the-middle attacker who could serve a tampered JDK — which then becomes the `java` used by the rest of your pipeline, with access to your secrets and credentials. Always extend trust to your CA instead of turning verification off.
+Do **not** work around this error by disabling TLS verification (for example, by setting `NODE_TLS_REJECT_UNAUTHORIZED=0`). Disabling verification would expose your workflow to a man-in-the-middle attacker who could serve a tampered JDK — which then becomes the `java` used by the rest of your pipeline, with access to your secrets and credentials. It also weakens the version metadata requests, which are not checksum-verified at all: a tampered manifest can redirect setup-java to an attacker-controlled download URL. `setup-java` does verify authoritative checksums for [supported distributions](../README.md#download-integrity-and-signatures), and can verify package signatures with `verify-signature: true`, but those checks are not a substitute for a trusted TLS chain. Always extend trust to your CA instead of turning verification off.
 
 ### Trusting an internal CA inside the installed JDK
 

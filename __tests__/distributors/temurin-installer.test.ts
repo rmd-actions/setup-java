@@ -13,6 +13,7 @@ import type {TemurinImplementation as TemurinImplementationType} from '../../src
 import {HttpClient} from '@actions/http-client';
 import fs from 'fs';
 import os from 'os';
+import path from 'path';
 
 import manifestData from '../data/temurin.json' with {type: 'json'};
 
@@ -71,7 +72,8 @@ jest.unstable_mockModule('../../src/util.js', () => ({
 
 jest.unstable_mockModule('../../src/gpg.js', () => ({
   importKey: jest.fn(),
-  deleteKey: jest.fn(),
+  removeGpgHome: jest.fn(),
+  isGpgAvailable: jest.fn(),
   verifyPackageSignature: jest.fn()
 }));
 
@@ -114,6 +116,16 @@ describe('getAvailableVersions', () => {
         version: '16',
         architecture: 'x64',
         packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot,
+      'os=mac&architecture=x64&image_type=jdk&release_type=ga&jvm_impl=hotspot&page_size=20&page=0'
+    ],
+    [
+      {
+        version: '25',
+        architecture: 'x64',
+        packageType: 'jdk+jmods',
         checkLatest: false
       },
       TemurinImplementation.Hotspot,
@@ -168,6 +180,27 @@ describe('getAvailableVersions', () => {
       expect(spyHttpClient.mock.calls[0][0]).toBe(expectedUrl);
     }
   );
+
+  it('requests the JMOD image type', async () => {
+    const distribution = new TemurinDistribution(
+      {
+        version: '25',
+        architecture: 'x64',
+        packageType: 'jdk+jmods',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+    distribution['getPlatformOption'] = () => 'linux';
+
+    await distribution['getAvailableVersions']('jmods');
+
+    expect(spyHttpClient).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'os=linux&architecture=x64&image_type=jmods&release_type=ga'
+      )
+    );
+  });
 
   it('load available versions', async () => {
     const nextPageUrl =
@@ -229,7 +262,12 @@ describe('getAvailableVersions', () => {
 
   it.each([
     [TemurinImplementation.Hotspot, 'jdk', 'Java_Temurin-Hotspot_jdk'],
-    [TemurinImplementation.Hotspot, 'jre', 'Java_Temurin-Hotspot_jre']
+    [TemurinImplementation.Hotspot, 'jre', 'Java_Temurin-Hotspot_jre'],
+    [
+      TemurinImplementation.Hotspot,
+      'jdk+jmods',
+      'Java_Temurin-Hotspot_jdk+jmods'
+    ]
   ])(
     'find right toolchain folder',
     (
@@ -254,6 +292,7 @@ describe('getAvailableVersions', () => {
 
   it.each([
     ['amd64', 'x64'],
+    ['arm', 'arm'],
     ['arm64', 'aarch64']
   ])(
     'defaults to os.arch(): %s mapped to distro arch: %s',
@@ -310,6 +349,14 @@ describe('findPackageForDownload', () => {
     const resolvedVersion = await distribution['findPackageForDownload'](input);
     expect(resolvedVersion.version).toBe(expected);
     expect(resolvedVersion.signatureUrl).toBeDefined();
+    const vendorPackage = (manifestData as any[]).find(
+      item => item.version_data.semver === expected
+    ).binaries[0].package;
+    expect(resolvedVersion.checksum).toEqual({
+      algorithm: 'sha256',
+      value: vendorPackage.checksum,
+      source: vendorPackage.checksum_link
+    });
   });
 
   it('version "latest" is normalized to the newest available version', async () => {
@@ -386,10 +433,12 @@ describe('downloadTool', () => {
   let spyCacheDir: any;
   let spyReadDirSync: any;
   let spyRenameWinArchive: any;
+  let spyCopySync: any;
 
   beforeEach(() => {
     spyDownloadTool = tc.downloadTool as jest.Mock;
     spyDownloadTool.mockResolvedValue('/tmp/jdk.tar.gz');
+    (gpg.isGpgAvailable as jest.Mock).mockResolvedValue(true);
     spyVerifySignature = gpg.verifyPackageSignature as jest.Mock;
     spyVerifySignature.mockResolvedValue(undefined);
     spyExtractJdkFile = util.extractJdkFile as jest.Mock;
@@ -400,6 +449,8 @@ describe('downloadTool', () => {
     spyReadDirSync.mockReturnValue(['jdk-17'] as any);
     spyRenameWinArchive = util.renameWinArchive as jest.Mock;
     spyRenameWinArchive.mockReturnValue('/tmp/jdk.tar.gz.zip');
+    spyCopySync = jest.spyOn(fs, 'cpSync');
+    spyCopySync.mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -408,14 +459,13 @@ describe('downloadTool', () => {
     jest.restoreAllMocks();
   });
 
-  it('verifies signature when enabled', async () => {
+  it('verifies signatures by default', async () => {
     const distribution = new TemurinDistribution(
       {
         version: '17',
         architecture: 'x64',
         packageType: 'jdk',
-        checkLatest: false,
-        verifySignature: true
+        checkLatest: false
       },
       TemurinImplementation.Hotspot
     );
@@ -430,6 +480,209 @@ describe('downloadTool', () => {
       '/tmp/jdk.tar.gz',
       'https://example.com/jdk.tar.gz.sig',
       ADOPTIUM_PUBLIC_KEY
+    );
+  });
+
+  it('does not verify signatures when explicitly disabled', async () => {
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false,
+        verifySignature: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await distribution['downloadTool']({
+      version: '17.0.14+7',
+      url: 'https://example.com/jdk.tar.gz',
+      signatureUrl: 'https://example.com/jdk.tar.gz.sig'
+    });
+
+    expect(spyVerifySignature).not.toHaveBeenCalled();
+  });
+
+  it('skips implicit signature verification when gpg is unavailable', async () => {
+    (gpg.isGpgAvailable as jest.Mock).mockResolvedValue(false);
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        signatureUrl: 'https://example.com/jdk.tar.gz.sig'
+      })
+    ).resolves.toEqual({version: '17.0.14+7', path: '/tmp/toolcache'});
+
+    expect(spyVerifySignature).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(
+      "Input 'verify-signature' is enabled, but gpg is not available."
+    );
+  });
+
+  it('fails when signature verification is explicitly enabled without gpg', async () => {
+    (gpg.isGpgAvailable as jest.Mock).mockResolvedValue(false);
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false,
+        verifySignature: true
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        signatureUrl: 'https://example.com/jdk.tar.gz.sig'
+      })
+    ).rejects.toThrow(
+      "Input 'verify-signature' is enabled, but gpg is not available."
+    );
+
+    expect(spyVerifySignature).not.toHaveBeenCalled();
+  });
+
+  it('warns when implicit signature verification fails', async () => {
+    spyVerifySignature.mockRejectedValue(new Error('bad signature'));
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        signatureUrl: 'https://example.com/jdk.tar.gz.sig'
+      })
+    ).resolves.toEqual({version: '17.0.14+7', path: '/tmp/toolcache'});
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'https://github.com/actions/setup-java#download-integrity-and-signatures'
+      )
+    );
+  });
+
+  it('fails when explicitly requested signature verification fails', async () => {
+    spyVerifySignature.mockRejectedValue(new Error('bad signature'));
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false,
+        verifySignature: true
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        signatureUrl: 'https://example.com/jdk.tar.gz.sig'
+      })
+    ).rejects.toThrow(
+      /Failed to verify signature for Temurin version 17\.0\.14\+7.*bad signature.*https:\/\/github\.com\/actions\/setup-java#download-integrity-and-signatures/
+    );
+  });
+
+  it('warns when a signature is missing and verification is implicit', async () => {
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz'
+      })
+    ).resolves.toEqual({version: '17.0.14+7', path: '/tmp/toolcache'});
+
+    expect(core.warning).toHaveBeenCalledWith(
+      "Input 'verify-signature' is enabled, but no signature URL was found for Temurin version 17.0.14+7."
+    );
+    expect(spyVerifySignature).not.toHaveBeenCalled();
+  });
+
+  it('downloads and adds matching JMODs to the JDK', async () => {
+    spyDownloadTool
+      .mockResolvedValueOnce('/tmp/jdk.tar.gz')
+      .mockResolvedValueOnce('/tmp/jmods.tar.gz');
+    spyExtractJdkFile
+      .mockResolvedValueOnce('/tmp/extracted')
+      .mockResolvedValueOnce('/tmp/extracted-jmods');
+    spyReadDirSync
+      .mockReturnValueOnce(['jdk-25'] as any)
+      .mockReturnValueOnce(['jdk-25-jmods'] as any);
+    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    const distribution = new TemurinDistribution(
+      {
+        version: '25',
+        architecture: 'x64',
+        packageType: 'jdk+jmods',
+        checkLatest: false,
+        verifySignature: false
+      },
+      TemurinImplementation.Hotspot
+    );
+    distribution['resolvePackage'] = jest.fn().mockResolvedValue({
+      version: '25.0.3+9',
+      url: 'https://example.com/jmods.tar.gz'
+    });
+
+    await distribution['downloadTool']({
+      version: '25.0.3+9',
+      url: 'https://example.com/jdk.tar.gz'
+    });
+
+    expect(distribution['resolvePackage']).toHaveBeenCalledWith(
+      '25.0.3+9',
+      'jmods'
+    );
+    expect(spyDownloadTool).toHaveBeenNthCalledWith(
+      2,
+      'https://example.com/jmods.tar.gz'
+    );
+    expect(spyCopySync).toHaveBeenCalledWith(
+      path.join('/tmp/extracted-jmods', 'jdk-25-jmods'),
+      process.platform === 'darwin'
+        ? path.join('/tmp/extracted', 'jdk-25', 'Contents', 'Home', 'jmods')
+        : path.join('/tmp/extracted', 'jdk-25', 'jmods'),
+      {recursive: true}
+    );
+    expect(spyCacheDir).toHaveBeenCalledWith(
+      path.join('/tmp/extracted', 'jdk-25'),
+      'Java_Temurin-Hotspot_jdk+jmods',
+      '25.0.3-9',
+      'x64'
     );
   });
 
