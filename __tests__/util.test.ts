@@ -13,13 +13,6 @@ import * as path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Mock @actions/cache
-jest.unstable_mockModule('@actions/cache', () => ({
-  isFeatureAvailable: jest.fn(),
-  saveCache: jest.fn(),
-  restoreCache: jest.fn()
-}));
-
 // Mock @actions/core
 jest.unstable_mockModule('@actions/core', () => ({
   getInput: jest.fn(),
@@ -46,7 +39,6 @@ jest.unstable_mockModule('@actions/core', () => ({
   toPosixPath: jest.fn((p: string) => p)
 }));
 
-const cache = await import('@actions/cache');
 const core = await import('@actions/core');
 
 const {
@@ -54,11 +46,74 @@ const {
   getNextPageUrlFromLinkHeader,
   getVersionFromFileContent,
   isVersionSatisfies,
-  isCacheFeatureAvailable,
   isGhes,
   validatePaginationUrl,
-  getLatestMajorVersion
+  getLatestMajorVersion,
+  getBooleanInput
 } = await import('../src/util.js');
+
+describe('getBooleanInput', () => {
+  let inputs: Record<string, string>;
+
+  beforeEach(() => {
+    inputs = {};
+    (core.getInput as jest.Mock).mockImplementation(
+      (name: string) => inputs[name] ?? ''
+    );
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  it.each([
+    ['true', true],
+    ['TRUE', true],
+    ['TrUe', true],
+    [' true ', true],
+    ['false', false],
+    ['FALSE', false],
+    ['FaLsE', false],
+    [' false ', false]
+  ])('parses %j as %s', (value: string, expected: boolean) => {
+    inputs['boolean-input'] = value;
+
+    expect(getBooleanInput('boolean-input')).toBe(expected);
+  });
+
+  it.each([
+    [undefined, false],
+    [false, false],
+    [true, true]
+  ])(
+    'uses the configured default %s when the input is omitted',
+    (defaultValue: boolean | undefined, expected: boolean) => {
+      expect(getBooleanInput('boolean-input', defaultValue)).toBe(expected);
+    }
+  );
+
+  it('uses the configured default for a whitespace-only input', () => {
+    inputs['boolean-input'] = '   ';
+
+    expect(getBooleanInput('boolean-input', true)).toBe(true);
+  });
+
+  it.each([
+    'check-latest',
+    'force-download',
+    'set-default',
+    'verify-signature',
+    'overwrite-settings',
+    'show-download-progress',
+    'problem-matcher'
+  ])('rejects an invalid value for %s', inputName => {
+    inputs[inputName] = 'ture';
+
+    expect(() => getBooleanInput(inputName)).toThrow(
+      `Invalid value 'ture' for boolean input '${inputName}'. Expected 'true' or 'false'.`
+    );
+  });
+});
 
 describe('isVersionSatisfies', () => {
   it.each([
@@ -86,50 +141,6 @@ describe('isVersionSatisfies', () => {
       expect(actual).toBe(expected);
     }
   );
-});
-
-describe('isCacheFeatureAvailable', () => {
-  it('isCacheFeatureAvailable disabled on GHES', () => {
-    (cache.isFeatureAvailable as jest.Mock<any>).mockImplementation(
-      () => false
-    );
-    const infoMock = core.warning as jest.Mock;
-    const message =
-      'Caching is only supported on GHES version >= 3.5. If you are on a version >= 3.5, please check with your GHES admin if the Actions cache service is enabled or not.';
-    try {
-      process.env['GITHUB_SERVER_URL'] = 'http://example.com';
-      expect(isCacheFeatureAvailable()).toBeFalsy();
-      expect(infoMock).toHaveBeenCalledWith(message);
-    } finally {
-      delete process.env['GITHUB_SERVER_URL'];
-    }
-  });
-
-  it('isCacheFeatureAvailable disabled on dotcom', () => {
-    (cache.isFeatureAvailable as jest.Mock<any>).mockImplementation(
-      () => false
-    );
-    const infoMock = core.warning as jest.Mock;
-    const message =
-      'The runner was not able to contact the cache service. Caching will be skipped';
-    try {
-      process.env['GITHUB_SERVER_URL'] = 'http://github.com';
-      expect(isCacheFeatureAvailable()).toBe(false);
-      expect(infoMock).toHaveBeenCalledWith(message);
-    } finally {
-      delete process.env['GITHUB_SERVER_URL'];
-    }
-  });
-
-  it('isCacheFeatureAvailable is enabled', () => {
-    (cache.isFeatureAvailable as jest.Mock<any>).mockImplementation(() => true);
-    expect(isCacheFeatureAvailable()).toBe(true);
-  });
-
-  afterEach(() => {
-    jest.resetAllMocks();
-    jest.clearAllMocks();
-  });
 });
 
 describe('convertVersionToSemver', () => {

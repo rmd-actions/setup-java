@@ -3,11 +3,7 @@ name: Validate Java e2e
 on:
   push:
     branches:
-      - main
       - releases/*
-    paths-ignore:
-      - '**.md'
-  pull_request:
     paths-ignore:
       - '**.md'
   schedule:
@@ -25,10 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15-intel, windows-latest, ubuntu-latest]
-        distribution: [
+        distribution:
+          [
             'temurin',
-            'adopt',
-            'adopt-openj9',
             'zulu',
             'liberica',
             'microsoft',
@@ -39,7 +34,7 @@ jobs:
             'jetbrains',
             'kona',
             'liberica-nik'
-          ] # internally 'adopt-hotspot' is the same as 'adopt'
+          ]
         version: ['21', '11', '17']
         exclude:
           - distribution: microsoft
@@ -83,6 +78,15 @@ jobs:
           - distribution: oracle
             os: ubuntu-latest
             version: 21
+          - distribution: oracle-openjdk
+            os: macos-15-intel
+            version: 21
+          - distribution: oracle-openjdk
+            os: windows-latest
+            version: 21
+          - distribution: oracle-openjdk
+            os: ubuntu-latest
+            version: 21
           - distribution: graalvm
             os: macos-latest
             version: 17.0.12
@@ -112,6 +116,25 @@ jobs:
       - name: Verify Java
         env:
           JAVA_VERSION: ${{ matrix.version }}
+          JAVA_PATH: ${{ steps.setup-java.outputs.path }}
+        run: bash __tests__/verify-java.sh "$JAVA_VERSION" "$JAVA_PATH"
+        shell: bash
+
+  setup-java-checksum-verification:
+    name: Corretto checksum verification - ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout_step
+      - name: setup-java with forced download
+        uses: ./
+        id: setup-java
+        with:
+          java-version: '21'
+          distribution: corretto
+          force-download: true
+      - name: Verify Java
+        env:
+          JAVA_VERSION: '21'
           JAVA_PATH: ${{ steps.setup-java.outputs.path }}
         run: bash __tests__/verify-java.sh "$JAVA_VERSION" "$JAVA_PATH"
         shell: bash
@@ -266,10 +289,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify Java env variables
         run: |
+          $javaArch = if ($env:RUNNER_ARCH -eq "ARM64") { "AARCH64" } else { $env:RUNNER_ARCH }
           $versionsArr = "11","17"
           foreach ($version in $versionsArr)
           {
-            $envName = "JAVA_HOME_${version}_${env:RUNNER_ARCH}"
+            $envName = "JAVA_HOME_${version}_${javaArch}"
             $JavaVersionPath = [Environment]::GetEnvironmentVariable($envName)
             if (-not (Test-Path "$JavaVersionPath")) {
               Write-Host "$envName is not found"
@@ -471,6 +495,25 @@ jobs:
         run: bash __tests__/verify-java.sh "$JAVA_VERSION" "$JAVA_PATH"
         shell: bash
 
+  setup-java-unsupported-platform:
+    name: Reject unsupported Oracle x86 on Linux
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout_step
+      - name: Attempt unsupported setup
+        id: unsupported-setup
+        continue-on-error: true
+        uses: ./
+        with:
+          distribution: oracle
+          java-version: '21'
+          architecture: x86
+      - name: Verify setup was rejected
+        if: always()
+        env:
+          SETUP_OUTCOME: ${{ steps.unsupported-setup.outcome }}
+        run: test "$SETUP_OUTCOME" = failure
+
   setup-java-version-both-version-inputs-presents:
     name: ${{ matrix.distribution }} version (should be from input) - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -537,7 +580,7 @@ jobs:
       fail-fast: false
       matrix:
         os: *default_os
-        distribution: ['adopt', 'adopt-openj9', 'zulu']
+        distribution: ['temurin', 'zulu']
         java-version-file: ['.java-version', '.tool-versions']
     steps:
       - *checkout_step
@@ -566,7 +609,7 @@ jobs:
       fail-fast: false
       matrix:
         os: *default_os
-        distribution: ['adopt', 'zulu', 'liberica']
+        distribution: ['temurin', 'zulu', 'liberica']
         java-version-file: ['.java-version', '.tool-versions', '.sdkmanrc']
     steps:
       - *checkout_step
@@ -640,7 +683,8 @@ jobs:
         shell: bash
       - name: Verify JAVA_HOME_21 env var is set
         run: |
-          $envName = "JAVA_HOME_21_${env:RUNNER_ARCH}"
+          $javaArch = if ($env:RUNNER_ARCH -eq "ARM64") { "AARCH64" } else { $env:RUNNER_ARCH }
+          $envName = "JAVA_HOME_21_${javaArch}"
           $JavaVersionPath = [Environment]::GetEnvironmentVariable($envName)
           if (-not $JavaVersionPath) {
             Write-Host "$envName is not set"

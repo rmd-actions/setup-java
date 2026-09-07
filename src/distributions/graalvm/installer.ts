@@ -43,6 +43,7 @@ type OsVersions = 'linux' | 'macos' | 'windows';
 interface GraalVMCommunityAsset {
   name: string;
   browser_download_url: string;
+  digest?: string;
 }
 
 interface GraalVMCommunityRelease {
@@ -66,7 +67,7 @@ export class GraalVMDistribution extends JavaBase {
       core.info(
         `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
       );
-      let javaArchivePath = await tc.downloadTool(javaRelease.url);
+      let javaArchivePath = await this.downloadAndVerify(javaRelease);
 
       core.info(`Extracting Java archive...`);
       const extension = getDownloadArchiveExtension();
@@ -110,6 +111,11 @@ export class GraalVMDistribution extends JavaBase {
     }
   }
 
+  protected setJavaDefault(version: string, toolPath: string): void {
+    super.setJavaDefault(version, toolPath);
+    core.exportVariable('GRAALVM_HOME', toolPath);
+  }
+
   protected async findPackageForDownload(
     range: string
   ): Promise<JavaDownloadRelease> {
@@ -140,7 +146,11 @@ export class GraalVMDistribution extends JavaBase {
     const response = await this.http.head(fileUrl);
     this.handleHttpResponse(response, range);
 
-    return {url: fileUrl, version: range};
+    return {
+      url: fileUrl,
+      version: range,
+      checksum: await this.fetchChecksum(`${fileUrl}.sha256`, 'sha256')
+    };
   }
 
   protected validateVersionRange(range: string): void {
@@ -279,7 +289,8 @@ export class GraalVMDistribution extends JavaBase {
 
     return {
       url: downloadUrl,
-      version: latestVersion.version
+      version: latestVersion.version,
+      checksum: await this.fetchChecksum(`${downloadUrl}.sha256`, 'sha256')
     };
   }
 
@@ -451,9 +462,22 @@ export class GraalVMCommunityDistribution extends GraalVMDistribution {
         for (const asset of release.assets ?? []) {
           const version = this.extractAssetVersion(asset.name, assetSuffix);
           if (version) {
+            const digest = asset.digest?.match(/^sha256:([a-f0-9]{64})$/i)?.[1];
+            if (!digest) {
+              core.debug(
+                `No authoritative sha256 digest is available for ${asset.name}; skipping checksum verification for this asset.`
+              );
+            }
             versions.set(version, {
               version,
-              url: asset.browser_download_url
+              url: asset.browser_download_url,
+              checksum: digest
+                ? {
+                    algorithm: 'sha256',
+                    value: digest,
+                    source: GRAALVM_COMMUNITY_RELEASES_URL
+                  }
+                : undefined
             });
           }
         }

@@ -1,8 +1,7 @@
 import * as core from '@actions/core';
 import * as gpg from './gpg.js';
 import * as constants from './constants.js';
-import {isJobStatusSuccess} from './util.js';
-import {save} from './cache.js';
+import {getBooleanInput, isJobStatusSuccess} from './util.js';
 import {fileURLToPath} from 'url';
 
 async function removePrivateKeyFromKeychain() {
@@ -28,7 +27,17 @@ async function removePrivateKeyFromKeychain() {
 async function saveCache() {
   const jobStatus = isJobStatusSuccess();
   const cache = core.getInput(constants.INPUT_CACHE);
-  return jobStatus && cache ? save(cache) : Promise.resolve();
+  if (!jobStatus || !cache) {
+    return;
+  }
+
+  if (getBooleanInput(constants.INPUT_CACHE_READ_ONLY, false)) {
+    core.info('Cache saving is skipped because cache-read-only is enabled.');
+    return;
+  }
+
+  const {save} = await import('./cache.js');
+  await save(cache);
 }
 
 /**
