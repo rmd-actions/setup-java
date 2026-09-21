@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 import fs from 'fs';
 import path from 'path';
 import semver from 'semver';
@@ -12,10 +11,13 @@ import {
   JavaInstallerResults
 } from '../base-models.js';
 import {
+  cacheJdkDir,
   convertVersionToSemver,
   extractJdkFile,
+  getArtifactFingerprint,
   getDownloadArchiveExtension,
   getGitHubHttpHeaders,
+  getJavaVersionFromReleaseFile,
   getLatestMajorVersion,
   getNextPageUrlFromLinkHeader,
   isVersionSatisfies,
@@ -95,20 +97,31 @@ export class GraalVMDistribution extends JavaBase {
       }
 
       const archivePath = path.join(extractedJavaPath, dirContents[0]);
-      const version = this.getToolcacheVersionName(javaRelease.version);
+      const installedVersion = javaRelease.floating
+        ? getJavaVersionFromReleaseFile(archivePath)
+        : javaRelease.version;
+      const version = this.getToolcacheVersionName(installedVersion);
 
-      const javaPath = await tc.cacheDir(
+      const javaPath = await cacheJdkDir(
         archivePath,
         this.toolcacheFolderName,
         version,
         this.architecture
       );
 
-      return {version: javaRelease.version, path: javaPath};
+      return {version: installedVersion, path: javaPath};
     } catch (error) {
       core.error(`Failed to download and extract GraalVM: ${error}`);
       throw error;
     }
+  }
+
+  protected requiresRemoteResolution(): boolean {
+    return (
+      this.distribution === 'GraalVM' &&
+      this.stable &&
+      !this.version.includes('.')
+    );
   }
 
   protected setJavaDefault(version: string, toolPath: string): void {
@@ -146,10 +159,18 @@ export class GraalVMDistribution extends JavaBase {
     const response = await this.http.head(fileUrl);
     this.handleHttpResponse(response, range);
 
+    // A major-only range resolves to the vendor's `/latest/` path, whose
+    // contents change when a new build is published.
+    const floating = !range.includes('.');
+
     return {
       url: fileUrl,
       version: range,
-      checksum: await this.fetchChecksum(`${fileUrl}.sha256`, 'sha256')
+      checksum: await this.fetchChecksum(`${fileUrl}.sha256`, 'sha256'),
+      floating,
+      fingerprint: floating
+        ? getArtifactFingerprint(response.message.headers)
+        : undefined
     };
   }
 

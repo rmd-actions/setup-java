@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 
 import path from 'path';
 import fs from 'fs';
@@ -7,7 +6,9 @@ import semver from 'semver';
 
 import {JavaBase} from '../base-installer.js';
 import {IZuluPackageDetails, IZuluVersions} from './models.js';
+import {isAlpineLinux} from '../platform-types.js';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getDownloadArchiveExtension,
   convertVersionToSemver,
@@ -122,7 +123,7 @@ export class ZuluDistribution extends JavaBase {
     const archiveName = fs.readdirSync(extractedJavaPath)[0];
     const archivePath = path.join(extractedJavaPath, archiveName);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       this.getToolcacheVersionName(javaRelease.version),
@@ -239,9 +240,10 @@ export class ZuluDistribution extends JavaBase {
       case 'win32':
         return 'windows';
       case 'linux':
-        // The new Metadata API's "linux" value returns both glibc and musl packages;
-        // use "linux_glibc" to target only glibc, which is what standard runners use.
-        return 'linux_glibc';
+        // The new Metadata API's "linux" value returns both glibc and musl
+        // packages, so target the libc the runner actually has. A glibc JDK
+        // cannot run on Alpine.
+        return isAlpineLinux() ? 'linux_musl' : 'linux_glibc';
       default:
         return process.platform;
     }

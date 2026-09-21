@@ -1,6 +1,10 @@
 import fs from 'fs';
 import * as core from '@actions/core';
-import {getBooleanInput, getVersionFromFileContent} from './util.js';
+import {
+  getBooleanInput,
+  getVersionFromFileContent,
+  isJdkCacheEnabled
+} from './util.js';
 import * as constants from './constants.js';
 import * as path from 'path';
 import {fileURLToPath} from 'url';
@@ -17,6 +21,7 @@ export async function run() {
   const packageType = core.getInput(constants.INPUT_JAVA_PACKAGE);
   const jdkFile = getJdkFileInput();
   const cache = core.getInput(constants.INPUT_CACHE);
+  const cacheJdk = isJdkCacheEnabled(cache);
   const cacheDependencyPath = core.getInput(
     constants.INPUT_CACHE_DEPENDENCY_PATH
   );
@@ -32,7 +37,7 @@ export async function run() {
     core.getInput(constants.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY) || undefined;
   const toolchainIds = core.getMultilineInput(constants.INPUT_MVN_TOOLCHAIN_ID);
   let actionError: Error | undefined;
-  let cacheRestore: Promise<void> | undefined;
+  let cacheRestore: Promise<PromiseSettledResult<void>> | undefined;
   const toolchainConfigurations: ToolchainConfiguration[] = [];
 
   try {
@@ -80,6 +85,7 @@ export async function run() {
         packageType,
         checkLatest,
         forceDownload,
+        cacheJdk,
         setDefault,
         verifySignature,
         verifySignaturePublicKey,
@@ -88,8 +94,9 @@ export async function run() {
         toolchainIds
       };
 
+      await validateCacheInput(cache);
       cacheRestore = cache
-        ? startCacheRestore(cache, cacheDependencyPath, cachePath)
+        ? settle(startCacheRestore(cache, cacheDependencyPath, cachePath))
         : undefined;
       toolchainConfigurations.push(
         await installVersion(versionInfo.version, installerInputsOptions)
@@ -105,6 +112,7 @@ export async function run() {
         packageType,
         checkLatest,
         forceDownload,
+        cacheJdk,
         setDefault,
         verifySignature,
         verifySignaturePublicKey,
@@ -113,8 +121,9 @@ export async function run() {
         toolchainIds
       };
 
+      await validateCacheInput(cache);
       cacheRestore = cache
-        ? startCacheRestore(cache, cacheDependencyPath, cachePath)
+        ? settle(startCacheRestore(cache, cacheDependencyPath, cachePath))
         : undefined;
       for (const [index, version] of versions.entries()) {
         toolchainConfigurations.push(
@@ -137,18 +146,30 @@ export async function run() {
   }
 
   if (cacheRestore) {
-    try {
-      await cacheRestore;
-    } catch (error) {
-      if (!actionError) {
-        actionError = error as Error;
-      }
+    const cacheResult = await cacheRestore;
+    if (cacheResult.status === 'rejected' && !actionError) {
+      actionError = cacheResult.reason as Error;
     }
   }
 
   if (actionError) {
     core.setFailed(actionError.message);
   }
+}
+
+async function validateCacheInput(cache: string): Promise<void> {
+  if (!cache) {
+    return;
+  }
+  const {validatePackageManager} = await import('./cache.js');
+  validatePackageManager(cache);
+}
+
+function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return promise.then<PromiseFulfilledResult<T>, PromiseRejectedResult>(
+    value => ({status: 'fulfilled', value}),
+    reason => ({status: 'rejected', reason})
+  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -183,6 +204,7 @@ async function installVersion(
     packageType,
     checkLatest,
     forceDownload,
+    cacheJdk,
     setDefault,
     verifySignature,
     verifySignaturePublicKey,
@@ -194,6 +216,7 @@ async function installVersion(
     packageType,
     checkLatest,
     forceDownload,
+    cacheJdk,
     setDefault,
     verifySignature,
     verifySignaturePublicKey,
@@ -238,6 +261,7 @@ interface installerInputsOptions {
   packageType: string;
   checkLatest: boolean;
   forceDownload: boolean;
+  cacheJdk: boolean;
   setDefault: boolean;
   verifySignature: boolean;
   verifySignaturePublicKey: string | undefined;

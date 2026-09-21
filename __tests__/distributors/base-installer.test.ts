@@ -70,6 +70,19 @@ jest.unstable_mockModule('@actions/tool-cache', () => ({
   }
 }));
 
+jest.unstable_mockModule('../../src/jdk-cache.js', () => ({
+  getJdkVerificationIdentity: jest.fn((verified: boolean, key?: string) =>
+    verified ? (key ? 'verified:custom' : 'verified:bundled') : 'unverified'
+  ),
+  registerJdk: jest.fn(),
+  restoreJdk: jest.fn()
+}));
+
+jest.unstable_mockModule('../../src/jdk-resolution-cache.js', () => ({
+  registerJdkResolution: jest.fn(),
+  restoreJdkResolution: jest.fn()
+}));
+
 const real_util_module = await import('../../src/util.js');
 jest.unstable_mockModule('../../src/util.js', () => ({
   ...real_util_module,
@@ -86,6 +99,10 @@ jest.unstable_mockModule('../../src/util.js', () => ({
 const core = await import('@actions/core');
 const tc = await import('@actions/tool-cache');
 const util = await import('../../src/util.js');
+const jdkCache = await import('../../src/jdk-cache.js');
+const jdkResolutionCache = await import('../../src/jdk-resolution-cache.js');
+const {getJavaPlatformIdentity} =
+  await import('../../src/distributions/platform-types.js');
 const {JavaBase} = await import('../../src/distributions/base-installer.js');
 
 class EmptyJavaBase extends JavaBase {
@@ -130,6 +147,47 @@ class EmptyJavaBase extends JavaBase {
     algorithm: 'sha256' | 'sha512' | ('sha256' | 'sha512')[]
   ) {
     return this.fetchChecksum(checksumUrl, algorithm);
+  }
+}
+
+class FloatingJavaBase extends JavaBase {
+  static actualVersion = '21.0.8+9';
+  static checksum: string | undefined = 'artifact-one';
+  static fingerprint: string | undefined = undefined;
+
+  constructor(installerOptions: JavaInstallerOptions) {
+    super('Floating', installerOptions);
+  }
+
+  protected async downloadTool(): Promise<JavaInstallerResults> {
+    return {
+      version: FloatingJavaBase.actualVersion,
+      path: path.join(
+        'toolcache',
+        this.toolcacheFolderName,
+        FloatingJavaBase.actualVersion.replace('+', '-'),
+        this.architecture
+      )
+    };
+  }
+
+  protected async findPackageForDownload(): Promise<JavaDownloadRelease> {
+    return {
+      version: '21',
+      url: 'https://example.com/java/21/latest/jdk-21.tar.gz',
+      checksum: FloatingJavaBase.checksum
+        ? {
+            algorithm: 'sha256',
+            value: FloatingJavaBase.checksum
+          }
+        : undefined,
+      floating: true,
+      fingerprint: FloatingJavaBase.fingerprint
+    };
+  }
+
+  protected requiresRemoteResolution(): boolean {
+    return true;
   }
 }
 
@@ -336,6 +394,10 @@ describe('setupJava', () => {
   let spyCoreError: any;
 
   beforeEach(() => {
+    (jdkCache.getJdkVerificationIdentity as jest.Mock).mockImplementation(
+      (verified: boolean, key?: string) =>
+        verified ? (key ? 'verified:custom' : 'verified:bundled') : 'unverified'
+    );
     spyGetToolcachePath = util.getToolcachePath as jest.Mock;
     spyGetToolcachePath.mockImplementation(
       (toolname: string, javaVersion: string, architecture: string) => {
@@ -378,6 +440,7 @@ describe('setupJava', () => {
     spyCoreError.mockImplementation(() => undefined);
 
     jest.spyOn(os, 'arch').mockReturnValue('x86' as ReturnType<typeof os.arch>);
+    FloatingJavaBase.fingerprint = undefined;
   });
 
   afterEach(() => {
@@ -457,14 +520,289 @@ describe('setupJava', () => {
     );
   });
 
+  describe('floating tool-cache reuse', () => {
+    let toolCacheRoot: string;
+
+    const installVersion = (toolcacheVersion: string): string => {
+      const architecturePath = path.join(
+        toolCacheRoot,
+        'Java_Floating_jdk',
+        toolcacheVersion,
+        'x64'
+      );
+      fs.mkdirSync(architecturePath, {recursive: true});
+      fs.writeFileSync(`${architecturePath}.complete`, '');
+      return architecturePath;
+    };
+
+    beforeEach(() => {
+      toolCacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-java-tc-'));
+      process.env['RUNNER_TOOL_CACHE'] = toolCacheRoot;
+      FloatingJavaBase.actualVersion = '21.0.8+9';
+      FloatingJavaBase.checksum = 'artifact-one';
+      (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+      spyTcFindAllVersions.mockReturnValue([]);
+    });
+
+    afterEach(() => {
+      fs.rmSync(toolCacheRoot, {recursive: true, force: true});
+      delete process.env['RUNNER_TOOL_CACHE'];
+    });
+
+    const createDistribution = (forceDownload = false) =>
+      new FloatingJavaBase({
+        version: '21',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false,
+        cacheJdk: true,
+        forceDownload
+      });
+
+    it('reuses a tool-cache installation once the resolution cache identifies the floating version', async () => {
+      const installedPath = installVersion('21.0.8-9');
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: {version: '21.0.8+9'}
+      });
+      const distribution = createDistribution();
+      const downloadTool = jest.spyOn(distribution as any, 'downloadTool');
+
+      await expect(distribution.setupJava()).resolves.toEqual({
+        version: '21.0.8+9',
+        path: installedPath
+      });
+
+      // The artifact behind the mutable URL is already installed, so neither a
+      // download nor a cache round-trip is needed.
+      expect(downloadTool).not.toHaveBeenCalled();
+      expect(jdkCache.restoreJdk).not.toHaveBeenCalled();
+    });
+
+    it('ignores a tool-cache installation of a version the resolution cache did not vouch for', async () => {
+      installVersion('21.0.7-6');
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: {version: '21.0.8+9'}
+      });
+      const distribution = createDistribution();
+      const downloadTool = jest.spyOn(distribution as any, 'downloadTool');
+
+      await distribution.setupJava();
+
+      expect(downloadTool).toHaveBeenCalled();
+    });
+
+    it('never reuses the tool-cache for a floating artifact the resolution cache cannot identify', async () => {
+      installVersion('21.0.8-9');
+      spyTcFindAllVersions.mockReturnValue(['21.0.8-9']);
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue(
+        undefined
+      );
+      const distribution = createDistribution();
+      const downloadTool = jest.spyOn(distribution as any, 'downloadTool');
+
+      await distribution.setupJava();
+
+      // Nothing ties the installed bytes to what the URL serves right now.
+      expect(downloadTool).toHaveBeenCalled();
+    });
+
+    it('still downloads a resolution-cache-identified version when force-download is set', async () => {
+      installVersion('21.0.8-9');
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: {version: '21.0.8+9'}
+      });
+      const distribution = createDistribution(true);
+      const downloadTool = jest.spyOn(distribution as any, 'downloadTool');
+
+      await distribution.setupJava();
+
+      expect(downloadTool).toHaveBeenCalled();
+    });
+  });
+
+  it('uses the concrete versions of two different floating artifacts under the same major', async () => {
+    spyTcFindAllVersions.mockReturnValue(['21.0.8-9']);
+    spyGetToolcachePath.mockImplementation(
+      (_toolname: string, version: string, architecture: string) =>
+        path.join('toolcache', 'Java_Floating_jdk', version, architecture)
+    );
+    (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue(
+      undefined
+    );
+    (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+
+    FloatingJavaBase.actualVersion = '21.0.8+9';
+    FloatingJavaBase.checksum = 'artifact-one';
+    const first = new FloatingJavaBase({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    });
+    await expect(first.setupJava()).resolves.toEqual({
+      version: '21.0.8+9',
+      path: path.join('toolcache', 'Java_Floating_jdk', '21.0.8-9', 'x64')
+    });
+
+    FloatingJavaBase.actualVersion = '21.0.9+7';
+    FloatingJavaBase.checksum = 'artifact-two';
+    const second = new FloatingJavaBase({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    });
+    await expect(second.setupJava()).resolves.toEqual({
+      version: '21.0.9+7',
+      path: path.join('toolcache', 'Java_Floating_jdk', '21.0.9-7', 'x64')
+    });
+
+    expect(spyCoreSetOutput).toHaveBeenNthCalledWith(3, 'version', '21.0.8+9');
+    expect(spyCoreSetOutput).toHaveBeenNthCalledWith(6, 'version', '21.0.9+7');
+    expect(jdkCache.registerJdk).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        version: '21.0.8+9',
+        source: 'sha256:artifact-one'
+      })
+    );
+    expect(jdkCache.registerJdk).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        version: '21.0.9+7',
+        source: 'sha256:artifact-two'
+      })
+    );
+    expect(jdkResolutionCache.registerJdkResolution).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({source: 'sha256:artifact-two'}),
+      expect.objectContaining({version: '21.0.9+7', floating: true})
+    );
+  });
+
+  it('does not trust a matching tool-cache version for a floating artifact', async () => {
+    spyTcFindAllVersions.mockReturnValue(['21.0.8-9']);
+    spyGetToolcachePath.mockReturnValue(
+      path.join('toolcache', 'Java_Floating_jdk', '21.0.8-9', 'x64')
+    );
+    (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+      release: {
+        version: '21.0.8+9',
+        url: 'https://example.com/java/21/latest/jdk-21.tar.gz',
+        checksum: {algorithm: 'sha256', value: 'artifact-republished'},
+        floating: true
+      },
+      fresh: true
+    });
+    (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+    FloatingJavaBase.actualVersion = '21.0.8+9';
+    FloatingJavaBase.checksum = 'artifact-republished';
+    const distribution = new FloatingJavaBase({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    });
+    const downloadTool = jest.spyOn(distribution as any, 'downloadTool');
+
+    await distribution.setupJava();
+
+    expect(jdkCache.restoreJdk).toHaveBeenCalled();
+    expect(downloadTool).toHaveBeenCalled();
+  });
+
+  it('does not cache a floating artifact with no way to identify its bytes', async () => {
+    spyTcFindAllVersions.mockReturnValue(['21.0.8-9']);
+    spyGetToolcachePath.mockReturnValue(
+      path.join('toolcache', 'Java_Floating_jdk', '21.0.8-9', 'x64')
+    );
+    FloatingJavaBase.actualVersion = '21.0.8+9';
+    FloatingJavaBase.checksum = undefined;
+    FloatingJavaBase.fingerprint = undefined;
+    const distribution = new FloatingJavaBase({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    });
+
+    await distribution.setupJava();
+
+    expect(jdkResolutionCache.restoreJdkResolution).not.toHaveBeenCalled();
+    expect(jdkResolutionCache.registerJdkResolution).not.toHaveBeenCalled();
+    expect(jdkCache.restoreJdk).not.toHaveBeenCalled();
+    expect(jdkCache.registerJdk).not.toHaveBeenCalled();
+  });
+
+  it('caches a checksum-less floating artifact identified by its response fingerprint', async () => {
+    spyTcFindAllVersions.mockReturnValue([]);
+    spyGetToolcachePath.mockReturnValue(
+      path.join('toolcache', 'Java_Floating_jdk', '21.0.8-9', 'x64')
+    );
+    FloatingJavaBase.actualVersion = '21.0.8+9';
+    FloatingJavaBase.checksum = undefined;
+    FloatingJavaBase.fingerprint = 'etag:"artifact-one"';
+    const distribution = new FloatingJavaBase({
+      version: '21',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    });
+
+    await distribution.setupJava();
+
+    // The fingerprint changes when the vendor republishes, so it is a safe
+    // identity even though no checksum is available.
+    expect(jdkResolutionCache.registerJdkResolution).toHaveBeenCalledWith(
+      expect.objectContaining({source: 'etag:"artifact-one"'}),
+      expect.objectContaining({version: '21.0.8+9'})
+    );
+    expect(jdkCache.registerJdk).toHaveBeenCalledWith(
+      expect.objectContaining({source: 'etag:"artifact-one"'})
+    );
+  });
+
+  it('separates the cache identities of two builds served by the same floating URL', async () => {
+    const sources: string[] = [];
+    (jdkCache.registerJdk as jest.Mock).mockImplementation((entry: any) => {
+      sources.push(entry.source);
+    });
+    spyTcFindAllVersions.mockReturnValue([]);
+    spyGetToolcachePath.mockReturnValue(
+      path.join('toolcache', 'Java_Floating_jdk', '21.0.8-9', 'x64')
+    );
+    FloatingJavaBase.actualVersion = '21.0.8+9';
+    FloatingJavaBase.checksum = undefined;
+
+    for (const fingerprint of ['etag:"before"', 'etag:"after"']) {
+      FloatingJavaBase.fingerprint = fingerprint;
+      await new FloatingJavaBase({
+        version: '21',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false,
+        cacheJdk: true
+      }).setupJava();
+    }
+
+    expect(sources).toEqual(['etag:"before"', 'etag:"after"']);
+  });
+
   it('should download java when force-download is enabled, even if the version is cached', async () => {
     mockJavaBase = new EmptyJavaBase({
       version: actualJavaVersion,
       architecture: 'x86',
       packageType: 'jdk',
       checkLatest: false,
-      forceDownload: true
+      forceDownload: true,
+      cacheJdk: true
     });
+
     const findInToolcache = jest.fn(() => ({
       version: actualJavaVersion,
       path: javaPathInstalled
@@ -484,6 +822,111 @@ describe('setupJava', () => {
     expect(spyCoreInfo).not.toHaveBeenCalledWith(
       `Resolved Java ${actualJavaVersion} from tool-cache`
     );
+    expect(jdkCache.restoreJdk).not.toHaveBeenCalled();
+    expect(jdkCache.registerJdk).toHaveBeenCalledWith(
+      expect.objectContaining({
+        version: actualJavaVersion,
+        verification: 'unverified'
+      })
+    );
+  });
+
+  it.each([
+    [false, false, false, false],
+    [false, true, true, true],
+    [true, false, false, false],
+    [true, true, false, true]
+  ])(
+    'handles force-download=%s and cache-jdk=%s',
+    async (forceDownload, cacheJdkEnabled, restores, registers) => {
+      mockJavaBase = new EmptyJavaBase({
+        version: actualJavaVersion,
+        architecture: 'x86',
+        packageType: 'jdk',
+        checkLatest: true,
+        forceDownload,
+        cacheJdk: cacheJdkEnabled
+      });
+      (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+
+      await mockJavaBase.setupJava();
+
+      expect(jdkCache.restoreJdk).toHaveBeenCalledTimes(restores ? 1 : 0);
+      expect(jdkCache.registerJdk).toHaveBeenCalledTimes(registers ? 1 : 0);
+    }
+  );
+
+  it('restores the exact resolved JDK before downloading', async () => {
+    const toolCachePath = path.join('toolcache');
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      RUNNER_TOOL_CACHE: toolCachePath
+    });
+    mockJavaBase = new EmptyJavaBase({
+      version: '11',
+      architecture: 'x86',
+      packageType: 'jdk',
+      checkLatest: true,
+      cacheJdk: true
+    });
+    const downloadTool = jest.spyOn(mockJavaBase as any, 'downloadTool');
+    (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(true);
+    jest
+      .spyOn(mockJavaBase as any, 'getRestoredJdkPath')
+      .mockReturnValue(javaPathInstalled);
+
+    await expect(mockJavaBase.setupJava()).resolves.toEqual({
+      version: actualJavaVersion,
+      path: javaPathInstalled
+    });
+
+    expect(jdkCache.restoreJdk).toHaveBeenCalledWith({
+      distribution: 'Empty',
+      packageType: 'jdk',
+      architecture: 'x86',
+      version: actualJavaVersion,
+      source: `some/random_url/java/${actualJavaVersion}`,
+      verification: 'unverified',
+      path: path.join(toolCachePath, 'Java_Empty_jdk', actualJavaVersion)
+    });
+    expect(downloadTool).not.toHaveBeenCalled();
+    expect(spyCoreInfo).not.toHaveBeenCalledWith('Trying to download...');
+    // A restored entry is already stored under its key; it must not be
+    // re-registered for a post-job save.
+    expect(jdkCache.registerJdk).not.toHaveBeenCalled();
+  });
+
+  it('registers the downloaded JDK identity after a JDK cache miss', async () => {
+    const toolCachePath = path.join('toolcache');
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      RUNNER_TOOL_CACHE: toolCachePath
+    });
+    mockJavaBase = new EmptyJavaBase({
+      version: '11',
+      architecture: 'x86',
+      packageType: 'jdk',
+      checkLatest: true,
+      cacheJdk: true
+    });
+    (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+
+    await mockJavaBase.setupJava();
+
+    const expectedIdentity = {
+      distribution: 'Empty',
+      packageType: 'jdk',
+      architecture: 'x86',
+      version: actualJavaVersion,
+      source: `some/random_url/java/${actualJavaVersion}`,
+      verification: 'unverified',
+      path: path.join(toolCachePath, 'Java_Empty_jdk', actualJavaVersion)
+    };
+    expect(jdkCache.restoreJdk).toHaveBeenCalledWith(expectedIdentity);
+    // Registration happens after the installation exists, so the post-job save
+    // can detect a later step replacing it.
+    expect(jdkCache.registerJdk).toHaveBeenCalledWith(expectedIdentity);
+    expect(spyCoreInfo).toHaveBeenCalledWith('Trying to download...');
   });
 
   it.each([
@@ -828,6 +1271,172 @@ describe('setupJava', () => {
     expect(spyCoreInfo).toHaveBeenCalledWith(
       'Installing Java 11.0.9 (not setting as default)'
     );
+  });
+
+  describe('resolution cache', () => {
+    // 11.0.9 is not in the mocked tool-cache, so the tool-cache short-circuit
+    // misses and the release has to be resolved, exactly as it does for every
+    // distribution that is not preinstalled on hosted runners.
+    const options: JavaInstallerOptions = {
+      version: '11.0.9',
+      architecture: 'x86',
+      packageType: 'jdk',
+      checkLatest: false,
+      cacheJdk: true
+    };
+    const cachedRelease = {
+      version: '11.0.9',
+      url: 'https://example.com/java/11.0.9'
+    };
+
+    const expectedRequest = {
+      distribution: 'Empty',
+      packageType: 'jdk',
+      platform: getJavaPlatformIdentity(),
+      architecture: 'x86',
+      versionSpec: '11.0.9',
+      stable: true
+    };
+
+    beforeEach(() => {
+      (jdkCache.restoreJdk as jest.Mock).mockResolvedValue(false);
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue(
+        undefined
+      );
+    });
+
+    it('skips the metadata API on a fresh cached resolution', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+      const findPackageForDownload = jest.spyOn(
+        mockJavaBase as any,
+        'findPackageForDownload'
+      );
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: cachedRelease,
+        fresh: true
+      });
+
+      await mockJavaBase.setupJava();
+
+      expect(jdkResolutionCache.restoreJdkResolution).toHaveBeenCalledWith(
+        expectedRequest
+      );
+      expect(findPackageForDownload).not.toHaveBeenCalled();
+      expect(jdkResolutionCache.registerJdkResolution).not.toHaveBeenCalled();
+      expect(spyCoreInfo).toHaveBeenCalledWith(
+        'Resolved Empty 11.0.9 from the resolution cache'
+      );
+    });
+
+    it('re-resolves and records the release on a miss', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+
+      await mockJavaBase.setupJava();
+
+      expect(jdkResolutionCache.registerJdkResolution).toHaveBeenCalledWith(
+        expectedRequest,
+        {version: '11.0.9', url: 'some/random_url/java/11.0.9'}
+      );
+    });
+
+    it('re-resolves when the cached resolution is stale', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+      const findPackageForDownload = jest.spyOn(
+        mockJavaBase as any,
+        'findPackageForDownload'
+      );
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: cachedRelease,
+        fresh: false
+      });
+
+      await mockJavaBase.setupJava();
+
+      expect(findPackageForDownload).toHaveBeenCalled();
+      expect(jdkResolutionCache.registerJdkResolution).toHaveBeenCalled();
+    });
+
+    it('falls back to a stale resolution when the metadata API fails', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+      const downloadTool = jest
+        .spyOn(mockJavaBase as any, 'downloadTool')
+        .mockResolvedValue({version: '11.0.9', path: javaPathInstalled});
+      jest
+        .spyOn(mockJavaBase as any, 'findPackageForDownload')
+        .mockRejectedValue(new Error('503 Service Unavailable'));
+      (jdkResolutionCache.restoreJdkResolution as jest.Mock).mockResolvedValue({
+        release: cachedRelease,
+        fresh: false
+      });
+
+      await expect(mockJavaBase.setupJava()).resolves.toEqual({
+        version: '11.0.9',
+        path: javaPathInstalled
+      });
+
+      expect(downloadTool).toHaveBeenCalledWith(cachedRelease);
+      expect(jdkResolutionCache.registerJdkResolution).not.toHaveBeenCalled();
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining('falling back to the cached resolution')
+      );
+    });
+
+    it('fails when the metadata API fails and nothing was cached', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+      jest
+        .spyOn(mockJavaBase as any, 'findPackageForDownload')
+        .mockRejectedValue(new Error('503 Service Unavailable'));
+
+      await expect(mockJavaBase.setupJava()).rejects.toThrow(
+        '503 Service Unavailable'
+      );
+    });
+
+    it('records the concrete version for a checksum-bound floating release', async () => {
+      mockJavaBase = new EmptyJavaBase(options);
+      jest
+        .spyOn(mockJavaBase as any, 'findPackageForDownload')
+        .mockResolvedValue({
+          version: '11.0.9',
+          url: 'https://example.com/java/11/latest/jdk-11.tar.gz',
+          checksum: {algorithm: 'sha256', value: 'abc'},
+          floating: true
+        });
+
+      await mockJavaBase.setupJava();
+
+      expect(jdkResolutionCache.registerJdkResolution).toHaveBeenCalledWith(
+        {
+          distribution: 'Empty',
+          packageType: 'jdk',
+          platform: getJavaPlatformIdentity(),
+          architecture: 'x86',
+          versionSpec: '11.0.9',
+          stable: true,
+          source: 'sha256:abc'
+        },
+        {
+          version: '11.0.9',
+          url: 'https://example.com/java/11/latest/jdk-11.tar.gz',
+          checksum: {algorithm: 'sha256', value: 'abc'},
+          floating: true
+        }
+      );
+    });
+
+    it.each([
+      ['cache-jdk is disabled', {cacheJdk: false}],
+      ['check-latest is enabled', {checkLatest: true}],
+      ['force-download is enabled', {forceDownload: true}],
+      ['java-version is "latest"', {version: 'latest'}]
+    ])('is bypassed when %s', async (_name, overrides) => {
+      mockJavaBase = new EmptyJavaBase({...options, ...overrides});
+
+      await mockJavaBase.setupJava();
+
+      expect(jdkResolutionCache.restoreJdkResolution).not.toHaveBeenCalled();
+      expect(jdkResolutionCache.registerJdkResolution).not.toHaveBeenCalled();
+    });
   });
 });
 

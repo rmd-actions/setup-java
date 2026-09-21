@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 
 import fs from 'fs';
 import path from 'path';
@@ -16,6 +15,7 @@ import {
   JavaInstallerResults
 } from '../base-models.js';
 import {
+  cacheJdkDir,
   extractJdkFile,
   getNextPageUrlFromLinkHeader,
   getDownloadArchiveExtension,
@@ -24,6 +24,7 @@ import {
   MAX_PAGINATION_PAGES,
   validatePaginationUrl
 } from '../../util.js';
+import {isAlpineLinux} from '../platform-types.js';
 
 export {ADOPTIUM_PUBLIC_KEY} from './adoptium-key.js';
 
@@ -122,7 +123,7 @@ export class TemurinDistribution extends JavaBase {
     }
     const version = this.getToolcacheVersionName(javaRelease.version);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,
@@ -274,7 +275,7 @@ export class TemurinDistribution extends JavaBase {
       case 'win32':
         return 'windows';
       case 'linux':
-        if (fs.existsSync('/etc/alpine-release')) {
+        if (isAlpineLinux()) {
           return 'alpine-linux';
         }
         return 'linux';

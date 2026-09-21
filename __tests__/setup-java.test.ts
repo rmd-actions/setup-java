@@ -33,7 +33,8 @@ jest.unstable_mockModule('fs', () => ({
 
 jest.unstable_mockModule('../src/util.js', () => ({
   getBooleanInput: jest.fn(),
-  getVersionFromFileContent: jest.fn()
+  getVersionFromFileContent: jest.fn(),
+  isJdkCacheEnabled: jest.fn()
 }));
 
 jest.unstable_mockModule('../src/toolchains.js', () => ({
@@ -46,7 +47,8 @@ jest.unstable_mockModule('../src/toolchain-ids.js', () => ({
 }));
 
 jest.unstable_mockModule('../src/cache.js', () => ({
-  restore: jest.fn()
+  restore: jest.fn(),
+  validatePackageManager: jest.fn()
 }));
 
 jest.unstable_mockModule('../src/cache-feature.js', () => ({
@@ -113,6 +115,14 @@ describe('setup action orchestration', () => {
         return booleanInputs.get(name as string) ?? defaultValue;
       }
     );
+    (util.isJdkCacheEnabled as jest.Mock).mockImplementation(
+      (cache: string) => {
+        const explicit = inputs.get('cache-jdk');
+        return explicit
+          ? (booleanInputs.get('cache-jdk') ?? explicit === 'true')
+          : Boolean(cache);
+      }
+    );
     (cacheFeature.isCacheFeatureAvailable as jest.Mock).mockReturnValue(true);
     (toolchainIds.validateToolchainIds as jest.Mock).mockImplementation(
       () => undefined
@@ -120,6 +130,9 @@ describe('setup action orchestration', () => {
     (toolchains.configureToolchains as jest.Mock).mockResolvedValue(undefined);
     (auth.configureAuthentication as jest.Mock).mockResolvedValue(undefined);
     (cache.restore as jest.Mock).mockResolvedValue(undefined);
+    (cache.validatePackageManager as jest.Mock).mockImplementation(
+      () => undefined
+    );
   });
 
   it('does not execute the action when imported', () => {
@@ -217,6 +230,7 @@ describe('setup action orchestration', () => {
         packageType: 'jdk',
         checkLatest: true,
         forceDownload: true,
+        cacheJdk: false,
         setDefault: false,
         verifySignature: true,
         verifySignaturePublicKey: 'public-key'
@@ -457,6 +471,7 @@ describe('setup action orchestration', () => {
   it('does not initialize cache modules when cache input is absent', async () => {
     inputs.set('distribution', 'temurin');
     multilineInputs.set('java-version', ['21']);
+    booleanInputs.set('cache-jdk', false);
     (factory.getJavaDistribution as jest.Mock).mockReturnValue({
       setupJava: jest.fn(async () => ({
         version: '21.0.4+7',
@@ -468,7 +483,81 @@ describe('setup action orchestration', () => {
 
     expect(cacheFeature.isCacheFeatureAvailable).not.toHaveBeenCalled();
     expect(cache.restore).not.toHaveBeenCalled();
+    expect(factory.getJavaDistribution).toHaveBeenCalledWith(
+      'temurin',
+      expect.objectContaining({cacheJdk: false}),
+      ''
+    );
   });
+
+  it('fails invalid cache input before resolving a Java distribution', async () => {
+    inputs.set('distribution', 'temurin');
+    inputs.set('cache', 'ant');
+    multilineInputs.set('java-version', ['21']);
+    const setupJava = jest.fn();
+    (factory.getJavaDistribution as jest.Mock).mockReturnValue({setupJava});
+    (cache.validatePackageManager as jest.Mock).mockImplementation(() => {
+      throw new Error('unknown package manager specified: ant');
+    });
+
+    await run();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'unknown package manager specified: ant'
+    );
+    expect(factory.getJavaDistribution).not.toHaveBeenCalled();
+    expect(setupJava).not.toHaveBeenCalled();
+    expect(cache.restore).not.toHaveBeenCalled();
+  });
+
+  it('reports missing java-version before validating the cache input', async () => {
+    inputs.set('distribution', 'temurin');
+    inputs.set('cache', 'ant');
+    (cache.validatePackageManager as jest.Mock).mockImplementation(() => {
+      throw new Error('unknown package manager specified: ant');
+    });
+
+    await run();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'java-version or java-version-file input expected'
+    );
+    expect(cache.validatePackageManager).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['', '', false],
+    ['', 'true', true],
+    ['', 'false', false],
+    ['maven', '', true],
+    ['maven', 'true', true],
+    ['maven', 'false', false]
+  ])(
+    'passes effective JDK caching for cache=%j and cache-jdk=%j',
+    async (cacheInput, cacheJdkInput, expected) => {
+      inputs.set('distribution', 'temurin');
+      inputs.set('cache', cacheInput);
+      inputs.set('cache-jdk', cacheJdkInput);
+      multilineInputs.set('java-version', ['21']);
+      if (cacheJdkInput) {
+        booleanInputs.set('cache-jdk', cacheJdkInput === 'true');
+      }
+      (factory.getJavaDistribution as jest.Mock).mockReturnValue({
+        setupJava: jest.fn(async () => ({
+          version: '21.0.4+7',
+          path: '/opt/java/21'
+        }))
+      });
+
+      await run();
+
+      expect(factory.getJavaDistribution).toHaveBeenCalledWith(
+        'temurin',
+        expect.objectContaining({cacheJdk: expected}),
+        ''
+      );
+    }
+  );
 
   it('reports unsupported distributions through core.setFailed', async () => {
     inputs.set('distribution', 'unsupported');
@@ -541,6 +630,47 @@ describe('setup action orchestration', () => {
     await run();
 
     expect(core.setFailed).toHaveBeenCalledWith('download failed');
+  });
+
+  it('observes cache failures while Java setup is still pending', async () => {
+    inputs.set('distribution', 'temurin');
+    inputs.set('cache', 'maven');
+    multilineInputs.set('java-version', ['21']);
+    const javaSetup = deferred<{version: string; path: string}>();
+    const setupJava = jest.fn(() => javaSetup.promise);
+    (factory.getJavaDistribution as jest.Mock).mockReturnValue({setupJava});
+    const cacheRestore = deferred<void>();
+    const cacheRestoreCalled = deferred<void>();
+    (cache.restore as jest.Mock).mockImplementation(() => {
+      cacheRestoreCalled.resolve();
+      return cacheRestore.promise;
+    });
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    const runPromise = run();
+    try {
+      // Only reject once the restore has actually started and while the Java
+      // installation is still pending, so the unfixed code would leave the
+      // rejection unhandled.
+      await cacheRestoreCalled.promise;
+      cacheRestore.reject(new Error('cache restore failed'));
+      await tick();
+
+      expect(setupJava).toHaveBeenCalled();
+      expect(unhandledRejections).toEqual([]);
+      expect(core.setFailed).not.toHaveBeenCalled();
+    } finally {
+      javaSetup.resolve({version: '21.0.4+7', path: '/opt/java/21'});
+      await runPromise;
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+
+    expect(unhandledRejections).toEqual([]);
+    expect(core.setFailed).toHaveBeenCalledWith('cache restore failed');
   });
 });
 

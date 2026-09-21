@@ -5,8 +5,10 @@
   - [Liberica](#Liberica)
   - [Liberica Native Image Kit](#Liberica-Native-Image-Kit)
   - [Microsoft](#Microsoft)
+  - [IBM Semeru](#IBM-Semeru)
   - [Amazon Corretto](#Amazon-Corretto)
   - [Oracle](#Oracle)
+  - [Oracle OpenJDK](#Oracle-OpenJDK)
   - [Alibaba Dragonwell](#Alibaba-Dragonwell)
   - [SapMachine](#SapMachine)
   - [GraalVM](#GraalVM)
@@ -17,13 +19,17 @@
   - [Package compatibility](#Package-compatibility)
   - [JavaFX Maven project](#JavaFX-Maven-project)
 - [Ensuring the Maven cache is complete (plugin dependencies)](#ensuring-the-maven-cache-is-complete-plugin-dependencies)
+- [Caching JDK installations](#caching-jdk-installations)
+- [Platform and architecture compatibility](#platform-and-architecture-compatibility)
 - [Installing custom Java architecture](#Installing-custom-Java-architecture)
 - [Installing JDK without setting as default](#Installing-JDK-without-setting-as-default)
 - [Installing custom Java distribution from local file](#Installing-Java-from-local-file)
 - [Testing against different Java distributions](#Testing-against-different-Java-distributions)
 - [Testing against different platforms](#Testing-against-different-platforms)
 - [Publishing using Apache Maven](#Publishing-using-Apache-Maven)
+- [Apache Maven with a settings path](#apache-maven-with-a-settings-path)
 - [Maven transfer progress (download logs)](#Maven-transfer-progress-download-logs)
+- [Java problem matcher (compiler annotations)](#java-problem-matcher-compiler-annotations)
 - [Publishing using Gradle](#Publishing-using-Gradle)
 - [Hosted Tool Cache](#Hosted-Tool-Cache)
 - [Modifying Maven Toolchains](#Modifying-Maven-Toolchains)
@@ -32,8 +38,17 @@
 
 See [action.yml](../action.yml) for more details on task inputs.
 
+> [!NOTE]
+> The examples on this page reference `actions/setup-java@v6`, which is still in
+> development on the `main` branch and is not yet published as a release tag. To
+> try the V6 features documented here (`cache-jdk`, `force-download`,
+> `problem-matcher`, `cache-path`, `cache-read-only`, `java-version: latest`,
+> `oracle-openjdk`, and the `*-env-var` input names), reference
+> `actions/setup-java@main`. For production workflows use the latest stable
+> release, `actions/setup-java@v5`, as shown in the [README](../README.md).
+
 ## Selecting a Java distribution
-Inputs `java-version` and `distribution` are mandatory and needs to be provided. See [Supported distributions](../README.md#Supported-distributions) for a list of available options.
+`java-version` and `distribution` select what gets installed. `java-version` may be replaced by `java-version-file`, and `distribution` is optional only when `java-version-file` points to a `.sdkmanrc` or `.tool-versions` file that carries a recognized vendor identifier. In every other case both inputs must be provided. See [Supported distributions](../README.md#Supported-distributions) for a list of available options.
 
 ### Eclipse Temurin
 
@@ -115,6 +130,20 @@ with:
 ```
 
 If the runner is not able to access github.com, any Java versions requested during a workflow run must come from the runner's tool cache. See "[Setting up the tool cache on self-hosted runners without internet access](https://docs.github.com/en/enterprise-server@3.2/admin/github-actions/managing-access-to-actions-from-githubcom/setting-up-the-tool-cache-on-self-hosted-runners-without-internet-access)" for more information.
+
+### IBM Semeru
+**NOTE:** IBM Semeru Runtime Open Edition provides OpenJ9-based builds. Stable releases only; `jdk` and `jre` packages are available.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'semeru'
+      java-version: '21'
+      java-package: jdk # optional (jdk or jre) - defaults to jdk
+  - run: java --version
+```
 
 ### Amazon Corretto
 **NOTE:** Amazon Corretto only supports the major version specification.
@@ -293,7 +322,7 @@ The package types have these meanings:
 | `temurin` | `jdk`, `jre`, `jdk+jmods` | `jdk` and `jre` follow the Adoptium catalog. `jdk+jmods` is available for Java 24 and later and resolves both artifacts at the exact same Java version. |
 | `zulu` | `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac` | Standard JDK builds go back to Java 6; JRE and JavaFX bundles start at Java 8. The vendor catalog has gaps among older non-LTS releases. CRaC bundles start at Java 17 and have more limited OS and architecture availability. |
 | `liberica` | `jdk`, `jre`, `jdk+fx`, `jre+fx` | Standard JDK builds go back to Java 8 in the supported action catalog; JRE and JavaFX "full" bundles also start at Java 8. Exact versions follow BellSoft's catalog for the requested platform. |
-| `liberica-nik` | `jdk`, `jdk+fx` | `java-version` selects the embedded JDK version, not the NIK/GraalVM release number. BellSoft currently publishes matching standard and JavaFX "full" bundles for JDK 11 and later, with gaps between feature releases. Other values are not meaningful: they resolve to the standard bundle. |
+| `liberica-nik` | `jdk`, `jdk+fx` | `java-version` selects the embedded JDK version, not the NIK/GraalVM release number. BellSoft currently publishes matching standard and JavaFX "full" bundles for JDK 11 and later, with gaps between feature releases. Any other `java-package` value is rejected. |
 | `microsoft` | `jdk` | Stable builds only. The bundled manifest contains Java 11, 16, 17, 21, and 25 releases; platform availability varies by release. |
 | `semeru` | `jdk`, `jre` | Stable OpenJ9 builds only. IBM publishes both image types for the supported release lines (currently 8, 11, 17, 21, and 25), subject to platform availability. |
 | `corretto` | `jdk`, `jre` | Accepts major versions only. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
@@ -468,6 +497,133 @@ jobs:
 > which provides purpose-built caching (see the
 > [setup-gradle documentation](https://github.com/gradle/actions/blob/main/docs/setup-gradle.md)).
 
+## Caching JDK installations
+
+`cache-jdk` controls caching for downloaded JDK installations. The JDK cache is
+stored and restored as its own cache entry, separate from the dependency and
+build-tool wrapper caches selected by `cache`. Whether it is *enabled*, however,
+is coupled to `cache`: setting `cache` turns JDK caching on as well, unless
+`cache-jdk` is set explicitly.
+
+| `cache` | `cache-jdk` | Dependency and wrapper caches | JDK cache |
+| --- | --- | --- | --- |
+| Omitted | Omitted | Disabled | Disabled |
+| Omitted | `true` | Disabled | Enabled |
+| Omitted | `false` | Disabled | Disabled |
+| Set | Omitted | Enabled | Enabled |
+| Set | `true` | Enabled | Enabled |
+| Set | `false` | Enabled | Disabled |
+
+JDK entries are specific to the runner operating system and normalized
+architecture. They are additionally separated by distribution, package type,
+exact resolved Java version, release identity, and signature-verification
+identity. The release identity is the authoritative checksum when available and
+otherwise the download URL without its query string. These dimensions prevent
+incompatible JDKs from sharing an entry. They also mean that a matrix or workflow
+using multiple JDK versions, distributions, package types, architectures, or
+operating systems stores a separate JDK entry for each identity and consumes
+cache storage for each one.
+
+For `distribution: jdkfile`, the release source is a SHA-256 hash of the local
+`jdk-file` contents, streamed so the archive is not held in memory. Changing the
+archive therefore creates a different JDK cache entry, even when its path and
+requested version are unchanged. The archive is only read when the runner tool
+cache holds no installation satisfying the requested version: a matching
+tool-cache installation short-circuits setup, so a changed `jdk-file` is not
+re-extracted for a version that is already installed. Use
+`force-download: true` when the archive contents change but the version does not.
+
+The verification identity separates unverified downloads from packages verified
+with the distribution's bundled signing key and from packages verified with each
+custom key. Custom public keys are represented by a SHA-256 fingerprint of
+normalized key material; the key itself is not placed in the cache key, the logs,
+or action state. A verified exact-key hit reuses content that was
+signature-verified when it was downloaded by the run that saved the entry,
+instead of downloading and verifying it again.
+
+> [!IMPORTANT]
+> The JDK cache **key** is what isolates verification modes and release
+> identity: a JDK cache entry created by an unverified download can never be
+> restored for a request that sets `verify-signature: true`, and vice versa.
+> `cache-jdk` does not change how the runner tool cache is used. setup-java
+> first looks for an installation in the runner tool cache — a preinstalled
+> JDK, or one installed by an earlier step of the same job — and uses it as-is. Such an installation is not downloaded again, and its checksum
+> and signature are not reverified, even when `verify-signature: true` is set,
+> because its verification history is not recorded in the tool cache. Use
+> `force-download: true` for a request that must download and verify the archive
+> itself.
+
+`check-latest: true` and `java-version: latest` resolve remote metadata before
+looking up the exact resolved JDK entry. `force-download: true` bypasses both the
+runner tool cache and JDK cache restore, but an enabled JDK cache still records
+the downloaded installation for a post-job save. `cache-read-only: true` allows
+restores but suppresses post-job saves for JDK, dependency, and wrapper caches.
+
+If the cache service fails to restore an entry, or the restored entry lacks the
+expected completed tool-cache path, setup continues by downloading the JDK.
+Post-job saves are best-effort and do not fail the job: cache keys are immutable,
+so an existing key or a concurrent job winning the save race is left unchanged,
+and a failure to save one JDK entry is reported as a warning without preventing
+the remaining entries from being saved.
+
+A key is only ever populated with the installation it was computed for. Because
+tool-cache paths are shared per version and architecture, a later step — for
+example one using `force-download: true` — can replace the installation an
+earlier step registered. setup-java detects that replacement in the post-job
+step and skips the save with a warning, so a key is never saved with content
+other than the installation it identifies. This guarantee holds without
+rehashing hundreds of megabytes of JDK content on every job.
+
+### Caching release resolution
+
+Only Temurin is preinstalled in the runner tool cache, so for every other
+distribution setup-java has to ask the distribution's metadata API which release
+satisfies `java-version` before it can look up a JDK cache entry. That makes the
+vendor API a dependency of every job, even one whose JDK is already cached.
+
+When JDK caching is enabled, setup-java also stores the resolved release itself
+in a small companion cache entry, keyed on the runner operating system,
+architecture, distribution, package type, requested version, and stability. A job
+that finds a current entry installs the JDK without contacting the distribution's
+metadata API at all.
+
+Entries carry the seven-day window they were resolved in. An entry from an
+earlier window is not used directly: setup-java still queries the metadata API,
+so a floating request such as `java-version: 21` keeps picking up new releases.
+The older entry is used only when that query fails, which keeps a job working
+through a vendor outage or rate limit. Because the entry also holds the download
+URL and checksum, this fallback works even when the JDK itself is not cached and
+still has to be downloaded. When the fallback is used, setup-java reports it with
+a warning.
+
+Seven days is deliberate. GitHub removes cache entries that have not been
+accessed for seven days, so a longer window would mean the previous entry is
+already evicted by the time the window rolls over, leaving no fallback at the
+moment one is most likely to be needed. It also comfortably covers JDK release
+cadence, which is monthly at its fastest and usually quarterly, and it means a
+repository whose workflows run infrequently still benefits. Use
+`check-latest: true` for a workflow that must resolve the newest release on every
+run.
+
+Restored entries are validated before use: the download URL and any signature URL
+must be well-formed HTTPS URLs and the checksum must use a supported algorithm.
+An entry that fails validation is ignored and the metadata API is queried
+instead. `check-latest: true`, `java-version: latest`, and `force-download: true`
+always query the metadata API and never read or write these entries.
+
+Releases whose download URL is not content-addressed are never stored. Oracle JDK
+and Oracle GraalVM build a `/latest/` URL when `java-version` names only a major
+version, and the bytes behind that URL change whenever a new build is published,
+so its URL and checksum are only consistent with each other at the moment they
+are resolved. Requesting a more specific version, such as `java-version: 21.0.2`,
+resolves an archived URL that is stored normally.
+
+JDK caching trades cache storage and cold-run save work for faster warm setup.
+A warm run restores the installed JDK instead of downloading, verifying, and
+extracting it, while the first run pays to upload it and every cached identity
+consumes repository cache storage. How much time this saves depends on the
+runner, distribution, JDK size, network, and cache eviction pressure.
+
 ## Platform and architecture compatibility
 
 The `architecture` input is normalized before setup-java checks the tool cache
@@ -590,7 +746,7 @@ steps:
 ```yaml
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         distribution: [ 'zulu', 'temurin' ]
@@ -606,7 +762,7 @@ jobs:
       - run: java --version
 ```
 
-#### Testing against different platforms
+## Testing against different platforms
 ```yaml
 jobs:
   build:
@@ -717,7 +873,7 @@ See the help docs on [Publishing a Package](https://help.github.com/en/github/ma
 
 #### Legacy / alternative: let setup-java import the key
 
-If you prefer signing with the `gpg` executable (for example because you are using `maven-gpg-plugin` older than 3.2.0), you can let setup-java import the key instead by providing the `gpg-private-key` and `gpg-passphrase-env-var` inputs. The private key is written to a file in the runner's temp directory, imported into the GPG keychain, and the file is promptly removed before proceeding with the rest of the setup process. A cleanup step removes the imported private key from the GPG keychain after the job completes regardless of the job status. This ensures that the private key is no longer accessible on self-hosted runners and cannot "leak" between jobs (hosted runners are always clean instances).
+If you prefer signing with the `gpg` executable (for example because you are using `maven-gpg-plugin` older than 3.2.0), you can let setup-java import the key instead by providing the `gpg-private-key` and `gpg-passphrase-env-var` inputs. setup-java creates a uniquely named, permission-restricted GPG home in the runner's temp directory, imports the key only into that isolated keyring, and exports `GNUPGHOME` for subsequent Maven and GPG commands. The temporary key file is permission-restricted and removed whether the import succeeds or fails. A cleanup step removes the complete action-owned GPG home after the job regardless of job status, without modifying the runner user's default keyring. Each setup-java invocation owns a separate keyring, including on persistent self-hosted runners.
 
 setup-java imports the key independently of the plugin version, but the generated passphrase profile described below uses `gpg.passphraseEnvName`, which requires `maven-gpg-plugin` 3.2.0 or newer. Since `gpg-passphrase-env-var` defaults to `GPG_PASSPHRASE`, setup-java writes that profile unless you override the input to `MAVEN_GPG_PASSPHRASE`.
 
@@ -945,7 +1101,7 @@ The result is a Toolchain with entries for JDKs 8, 11 and 15. You can even combi
     architecture: x64
 ```
 
-This will generate a Toolchains entry with the following values: `version: 1.6`, `vendor: jdkfile`, `id: Oracle_1.6`.
+This will generate a Toolchains entry with the following values: `version: 1.6`, `vendor: jdkfile`, `id: jdkfile_1.6`.
 
 ### Modifying The Toolchain Vendor For JDKs
 Each JDK provider will receive a default `vendor` using the `distribution` input value but this can be overridden with the `mvn-toolchain-vendor` parameter as follows.
@@ -979,7 +1135,7 @@ steps:
 ```
 
 ### Modifying The Toolchain ID For JDKs
-Each JDK provider will receive a default `id` based on the combination of `distribution` and `java-version` in the format of `distribution_java-version` (e.g. `temurin_11`) but this can be overridden with the `mvn-toolchain-id` parameter as follows.
+Each JDK provider will receive a default `id` based on the combination of the toolchain vendor and `java-version` in the format of `vendor_java-version` (e.g. `temurin_11`). The vendor defaults to the `distribution` input, so overriding `mvn-toolchain-vendor` also changes the generated default `id`. Set `mvn-toolchain-id` to override the `id` directly.
 
 ```yaml
 steps:
@@ -1144,7 +1300,7 @@ On **GitHub Enterprise Server**, traffic from your runners frequently passes thr
 
 ### Security warning: do not disable certificate verification
 
-Do **not** work around this error by disabling TLS verification (for example, by setting `NODE_TLS_REJECT_UNAUTHORIZED=0`). `setup-java` does not verify a pinned checksum or signature of the downloaded archive, so **TLS is effectively the only integrity guarantee** on the JDK download. Disabling verification would expose your workflow to a man-in-the-middle attacker who could serve a tampered JDK — which then becomes the `java` used by the rest of your pipeline, with access to your secrets and credentials. Always extend trust to your CA instead of turning verification off.
+Do **not** work around this error by disabling TLS verification (for example, by setting `NODE_TLS_REJECT_UNAUTHORIZED=0`). Disabling verification would expose your workflow to a man-in-the-middle attacker who could serve a tampered JDK — which then becomes the `java` used by the rest of your pipeline, with access to your secrets and credentials. It also weakens the version metadata requests, which are not checksum-verified at all: a tampered manifest can redirect setup-java to an attacker-controlled download URL. `setup-java` does verify authoritative checksums for [supported distributions](../README.md#download-integrity-and-signatures), and can verify package signatures with `verify-signature: true`, but those checks are not a substitute for a trusted TLS chain. Always extend trust to your CA instead of turning verification off.
 
 ### Trusting an internal CA inside the installed JDK
 

@@ -9,16 +9,15 @@ export const modules = {
 /* harmony export */   JetBrainsDistribution: () => (/* binding */ JetBrainsDistribution)
 /* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(3838);
-/* harmony import */ var _actions_tool_cache__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9805);
-/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9896);
-/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(fs__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(6928);
-/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_3__);
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(2088);
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(semver__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var _base_installer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(6242);
-/* harmony import */ var _util_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(4527);
-/* harmony import */ var _actions_http_client__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(4942);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9896);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(fs__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(6928);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_2__);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(2088);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(semver__WEBPACK_IMPORTED_MODULE_3__);
+/* harmony import */ var _base_installer_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(6242);
+/* harmony import */ var _util_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(4527);
+/* harmony import */ var _actions_http_client__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(4942);
 
 
 
@@ -26,8 +25,9 @@ export const modules = {
 
 
 
-
-class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_5__/* .JavaBase */ .O {
+const JETBRAINS_RELEASES_URL = 'https://api.github.com/repos/JetBrains/JetBrainsRuntime/releases?per_page=100';
+const GITHUB_API_ORIGIN = 'https://api.github.com';
+class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_4__/* .JavaBase */ .O {
     constructor(installerOptions) {
         super('JetBrains', installerOptions);
     }
@@ -41,9 +41,9 @@ class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_
             };
         });
         const satisfiedVersions = versions
-            .filter(item => (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .isVersionSatisfies */ .y)(range, item.version))
+            .filter(item => (0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .isVersionSatisfies */ .y)(range, item.version))
             .sort((a, b) => {
-            return -semver__WEBPACK_IMPORTED_MODULE_4___default().compareBuild(a.version, b.version);
+            return -semver__WEBPACK_IMPORTED_MODULE_3___default().compareBuild(a.version, b.version);
         });
         const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
         if (!resolvedFullVersion) {
@@ -63,11 +63,11 @@ class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_
         _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .info */ .pq(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
         const javaArchivePath = await this.downloadAndVerify(javaRelease);
         _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .info */ .pq(`Extracting Java archive...`);
-        const extractedJavaPath = await (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .extractJdkFile */ .PE)(javaArchivePath, 'tar.gz');
-        const archiveName = fs__WEBPACK_IMPORTED_MODULE_2___default().readdirSync(extractedJavaPath)[0];
-        const archivePath = path__WEBPACK_IMPORTED_MODULE_3___default().join(extractedJavaPath, archiveName);
+        const extractedJavaPath = await (0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .extractJdkFile */ .PE)(javaArchivePath, 'tar.gz');
+        const archiveName = fs__WEBPACK_IMPORTED_MODULE_1___default().readdirSync(extractedJavaPath)[0];
+        const archivePath = path__WEBPACK_IMPORTED_MODULE_2___default().join(extractedJavaPath, archiveName);
         const version = this.getToolcacheVersionName(javaRelease.version);
-        const javaPath = await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_1__/* .cacheDir */ .e8(archivePath, this.toolcacheFolderName, version, this.architecture);
+        const javaPath = await (0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .cacheJdkDir */ .Vj)(archivePath, this.toolcacheFolderName, version, this.architecture);
         return { version: javaRelease.version, path: javaPath };
     }
     async getAvailableVersions() {
@@ -76,34 +76,41 @@ class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_
         if (_actions_core__WEBPACK_IMPORTED_MODULE_0__/* .isDebug */ ._o()) {
             console.time('Retrieving available versions for JBR took'); // eslint-disable-line no-console
         }
-        // need to iterate through all pages to retrieve the list of all versions
-        // GitHub API doesn't provide way to retrieve the count of pages to iterate so infinity loop
-        let page_index = 1;
         const rawVersions = [];
-        const bearerToken = process.env.GITHUB_TOKEN;
-        while (true) {
-            const requestArguments = `per_page=100&page=${page_index}`;
-            const requestHeaders = {};
-            if (bearerToken) {
-                requestHeaders['Authorization'] = `Bearer ${bearerToken}`;
-            }
-            const rawUrl = `https://api.github.com/repos/JetBrains/JetBrainsRuntime/releases?${requestArguments}`;
-            if (_actions_core__WEBPACK_IMPORTED_MODULE_0__/* .isDebug */ ._o() && page_index === 1) {
-                // url is identical except page_index so print it once for debug
-                _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .debug */ .Yz(`Gathering available versions from '${rawUrl}'`);
-            }
-            const paginationPageResult = (await this.http.getJson(rawUrl, requestHeaders)).result;
+        const bearerToken = (0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .getGitHubToken */ .lK)();
+        const requestHeaders = {
+            Accept: 'application/vnd.github+json'
+        };
+        if (bearerToken) {
+            requestHeaders.Authorization = `Bearer ${bearerToken}`;
+        }
+        let releasesUrl = JETBRAINS_RELEASES_URL;
+        let pageCount = 0;
+        if (_actions_core__WEBPACK_IMPORTED_MODULE_0__/* .isDebug */ ._o()) {
+            _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .debug */ .Yz(`Gathering available versions from '${releasesUrl}'`);
+        }
+        while (releasesUrl) {
+            pageCount++;
+            const response = await this.http.getJson(releasesUrl, requestHeaders);
+            const paginationPageResult = response.result;
             if (!paginationPageResult || paginationPageResult.length === 0) {
-                // break infinity loop because we have reached end of pagination
                 break;
             }
-            const paginationPage = paginationPageResult.filter(version => this.stable ? !version.prerelease : version.prerelease);
-            if (!paginationPage || paginationPage.length === 0) {
-                // break infinity loop because we have reached end of pagination
+            rawVersions.push(...paginationPageResult.filter(version => this.stable ? !version.prerelease : version.prerelease));
+            const nextUrl = (0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .getNextPageUrlFromLinkHeader */ .rC)(response.headers);
+            if (nextUrl && !(0,_util_js__WEBPACK_IMPORTED_MODULE_5__/* .validatePaginationUrl */ .SA)(nextUrl, GITHUB_API_ORIGIN)) {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .warning */ .$e(`Ignoring pagination link with unexpected origin: ${nextUrl}`);
+                releasesUrl = null;
+            }
+            else {
+                releasesUrl = nextUrl;
+            }
+            if (pageCount >= _util_js__WEBPACK_IMPORTED_MODULE_5__/* .MAX_PAGINATION_PAGES */ .Tp) {
+                if (releasesUrl) {
+                    _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .warning */ .$e(`Reached pagination safeguard limit (${_util_js__WEBPACK_IMPORTED_MODULE_5__/* .MAX_PAGINATION_PAGES */ .Tp} pages) while listing JetBrains Runtime releases.`);
+                }
                 break;
             }
-            rawVersions.push(...paginationPage);
-            page_index++;
         }
         if (this.stable) {
             // Add versions not available from the API but are downloadable
@@ -156,13 +163,13 @@ class JetBrainsDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_
             let url = `https://cache-redirector.jetbrains.com/intellij-jbr/${type}-${semver}-${platform}-${arch}-b${build}.tar.gz`;
             let include = false;
             const res = await this.http.head(url);
-            if (res.message.statusCode === _actions_http_client__WEBPACK_IMPORTED_MODULE_7__/* .HttpCodes */ .Hv.OK) {
+            if (res.message.statusCode === _actions_http_client__WEBPACK_IMPORTED_MODULE_6__/* .HttpCodes */ .Hv.OK) {
                 include = true;
             }
             else {
                 url = `https://cache-redirector.jetbrains.com/intellij-jbr/${type}_nomod-${semver}-${platform}-${arch}-b${build}.tar.gz`;
                 const res2 = await this.http.head(url);
-                if (res2.message.statusCode === _actions_http_client__WEBPACK_IMPORTED_MODULE_7__/* .HttpCodes */ .Hv.OK) {
+                if (res2.message.statusCode === _actions_http_client__WEBPACK_IMPORTED_MODULE_6__/* .HttpCodes */ .Hv.OK) {
                     include = true;
                 }
             }

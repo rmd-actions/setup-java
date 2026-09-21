@@ -30770,6 +30770,8 @@ module.exports = {
 /* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
 /* harmony export */   At: () => (/* binding */ INPUT_CACHE_DEPENDENCY_PATH),
 /* harmony export */   E8: () => (/* binding */ INPUT_SET_DEFAULT),
+/* harmony export */   Fi: () => (/* binding */ STATE_GPG_HOME),
+/* harmony export */   GL: () => (/* binding */ INPUT_CACHE_JDK),
 /* harmony export */   I9: () => (/* binding */ INPUT_FORCE_DOWNLOAD),
 /* harmony export */   K$: () => (/* binding */ GPG_PASSPHRASE_PROFILE_ID),
 /* harmony export */   LS: () => (/* binding */ INPUT_ARCHITECTURE),
@@ -30809,7 +30811,6 @@ module.exports = {
 /* harmony export */   vO: () => (/* binding */ MVN_SETTINGS_FILE),
 /* harmony export */   wX: () => (/* binding */ INPUT_SHOW_DOWNLOAD_PROGRESS),
 /* harmony export */   wc: () => (/* binding */ INPUT_JDK_FILE_DEPRECATED),
-/* harmony export */   wm: () => (/* binding */ STATE_GPG_PRIVATE_KEY_FINGERPRINT),
 /* harmony export */   wz: () => (/* binding */ INPUT_GPG_PRIVATE_KEY),
 /* harmony export */   xp: () => (/* binding */ INPUT_DEFAULT_SERVER_PASSWORD)
 /* harmony export */ });
@@ -30849,11 +30850,12 @@ const MAVEN_GPG_PASSPHRASE_DEFAULT_ENV = 'MAVEN_GPG_PASSPHRASE';
 // Id of the settings.xml profile used to set `gpg.passphraseEnvName`.
 const GPG_PASSPHRASE_PROFILE_ID = 'setup-java-gpg';
 const INPUT_CACHE = 'cache';
+const INPUT_CACHE_JDK = 'cache-jdk';
 const INPUT_CACHE_DEPENDENCY_PATH = 'cache-dependency-path';
 const INPUT_CACHE_PATH = 'cache-path';
 const INPUT_CACHE_READ_ONLY = 'cache-read-only';
 const INPUT_JOB_STATUS = 'job-status';
-const STATE_GPG_PRIVATE_KEY_FINGERPRINT = 'gpg-private-key-fingerprint';
+const STATE_GPG_HOME = 'gpg-home';
 const M2_DIR = '.m2';
 const MVN_SETTINGS_FILE = 'settings.xml';
 const MVN_TOOLCHAINS_FILE = 'toolchains.xml';
@@ -30986,33 +30988,38 @@ function createUnsupportedPackageError(distributionName, packageType, supportedP
 /***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
 
 /* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   G6: () => (/* binding */ isAlpineLinux),
+/* harmony export */   U: () => (/* binding */ getJavaPlatformIdentity),
 /* harmony export */   dV: () => (/* binding */ normalizeArchitecture),
 /* harmony export */   sZ: () => (/* binding */ validateJavaPlatform)
 /* harmony export */ });
 /* unused harmony exports JAVA_PLATFORM_CAPABILITIES, normalizePlatform */
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(2088);
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__nccwpck_require__.n(semver__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var _package_types_js__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(7835);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(9896);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__nccwpck_require__.n(fs__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(2088);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(semver__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var _package_types_js__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(7835);
+
 
 
 const X64_ARM64 = ['x64', 'aarch64'];
 const STANDARD_LINUX = ['x64', 'x86', 'aarch64', 'ppc64le', 's390x'];
 const JAVA_PLATFORM_CAPABILITIES = {
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Temurin]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Temurin]: {
         platforms: {
             linux: [...STANDARD_LINUX, { architecture: 'armv7', versionRange: '<18' }],
             macos: X64_ARM64,
             windows: ['x64', 'x86', 'aarch64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Zulu]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Zulu]: {
         platforms: {
             linux: ['x64', 'x86', 'armv7', 'aarch64'],
             macos: X64_ARM64,
             windows: ['x64', 'x86', 'aarch64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Liberica]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Liberica]: {
         platforms: {
             linux: ['x64', 'x86', 'armv7', 'aarch64', 'ppc64le'],
             macos: X64_ARM64,
@@ -31020,31 +31027,31 @@ const JAVA_PLATFORM_CAPABILITIES = {
             solaris: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.LibericaNik]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.LibericaNik]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: X64_ARM64
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.JdkFile]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.JdkFile]: {
         unrestricted: true
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Microsoft]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Microsoft]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: X64_ARM64
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Semeru]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Semeru]: {
         platforms: {
             linux: ['x64', 'x86', 'ppc64le', 'ppc64', 's390x', 'aarch64'],
             macos: X64_ARM64,
             windows: ['x64', 'aarch64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Corretto]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Corretto]: {
         platforms: {
             linux: [
                 'x64',
@@ -31056,55 +31063,55 @@ const JAVA_PLATFORM_CAPABILITIES = {
             windows: ['x64', { architecture: 'x86', versionRange: '<12' }]
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Oracle]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Oracle]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Dragonwell]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Dragonwell]: {
         platforms: {
             linux: X64_ARM64,
             windows: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.SapMachine]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.SapMachine]: {
         platforms: {
             linux: ['x64', 'aarch64', 'ppc64le'],
             macos: X64_ARM64,
             windows: X64_ARM64
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.GraalVM]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.GraalVM]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.GraalVMCommunity]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.GraalVMCommunity]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.JetBrains]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.JetBrains]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: X64_ARM64
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.Kona]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Kona]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: ['x64']
         }
     },
-    [_package_types_js__WEBPACK_IMPORTED_MODULE_1__/* .JavaDistribution */ .zS.OracleOpenJdk]: {
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.OracleOpenJdk]: {
         platforms: {
             linux: X64_ARM64,
             macos: X64_ARM64,
@@ -31144,6 +31151,18 @@ function normalizeArchitecture(architecture) {
 function normalizePlatform(platform) {
     return PLATFORM_ALIASES[platform];
 }
+function isAlpineLinux(platform = process.platform, alpineReleaseExists) {
+    return (platform === 'linux' &&
+        (alpineReleaseExists ?? fs__WEBPACK_IMPORTED_MODULE_0___default().existsSync('/etc/alpine-release')));
+}
+function getJavaPlatformIdentity(platform = process.platform, alpineReleaseExists) {
+    if (platform === 'linux') {
+        return isAlpineLinux(platform, alpineReleaseExists)
+            ? 'linux-musl'
+            : 'linux-glibc';
+    }
+    return normalizePlatform(platform) ?? platform;
+}
 function validateJavaPlatform(distributionName, platform, architecture, version) {
     const normalizedArchitecture = normalizeArchitecture(architecture);
     if (!isJavaDistribution(distributionName)) {
@@ -31179,8 +31198,8 @@ function isVersionCompatible(version, supportedRange) {
     if (/^\d+(\.\d+){3,}$/.test(normalizedVersion)) {
         normalizedVersion = normalizeExtendedVersionToSemver(normalizedVersion);
     }
-    const requestedRange = semver__WEBPACK_IMPORTED_MODULE_0___default().validRange(normalizedVersion.replace(/-ea$/, ''));
-    const capabilityRange = semver__WEBPACK_IMPORTED_MODULE_0___default().validRange(supportedRange);
+    const requestedRange = semver__WEBPACK_IMPORTED_MODULE_1___default().validRange(normalizedVersion.replace(/-ea$/, ''));
+    const capabilityRange = semver__WEBPACK_IMPORTED_MODULE_1___default().validRange(supportedRange);
     if (!requestedRange || !capabilityRange) {
         return true;
     }
@@ -31192,7 +31211,7 @@ function isVersionCompatible(version, supportedRange) {
         }
         return version;
     }
-    return semver__WEBPACK_IMPORTED_MODULE_0___default().intersects(requestedRange, capabilityRange, {
+    return semver__WEBPACK_IMPORTED_MODULE_1___default().intersects(requestedRange, capabilityRange, {
         includePrerelease: true
     });
 }
@@ -31233,16 +31252,21 @@ function validateToolchainIds(versions, versionFile, toolchainIds) {
 /***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
 
 /* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   C4: () => (/* binding */ getJavaVersionFromReleaseFile),
 /* harmony export */   G4: () => (/* binding */ getTempDir),
 /* harmony export */   OS: () => (/* binding */ getVersionFromFileContent),
 /* harmony export */   PE: () => (/* binding */ extractJdkFile),
 /* harmony export */   SA: () => (/* binding */ validatePaginationUrl),
 /* harmony export */   Tp: () => (/* binding */ MAX_PAGINATION_PAGES),
 /* harmony export */   U_: () => (/* binding */ getGitHubHttpHeaders),
+/* harmony export */   VX: () => (/* binding */ getArtifactFingerprint),
+/* harmony export */   Vj: () => (/* binding */ cacheJdkDir),
 /* harmony export */   Vt: () => (/* binding */ getBooleanInput),
 /* harmony export */   ZY: () => (/* binding */ convertVersionToSemver),
 /* harmony export */   aT: () => (/* binding */ isGhes),
 /* harmony export */   ag: () => (/* binding */ getDownloadArchiveExtension),
+/* harmony export */   lK: () => (/* binding */ getGitHubToken),
+/* harmony export */   lN: () => (/* binding */ isJdkCacheEnabled),
 /* harmony export */   n2: () => (/* binding */ renameWinArchive),
 /* harmony export */   rC: () => (/* binding */ getNextPageUrlFromLinkHeader),
 /* harmony export */   ri: () => (/* binding */ getLatestMajorVersion),
@@ -31260,7 +31284,14 @@ function validateToolchainIds(versions, versionFile, toolchainIds) {
 /* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__nccwpck_require__.n(semver__WEBPACK_IMPORTED_MODULE_3__);
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3838);
 /* harmony import */ var _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__ = __nccwpck_require__(9805);
-/* harmony import */ var _constants_js__WEBPACK_IMPORTED_MODULE_6__ = __nccwpck_require__(7242);
+/* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_6__ = __nccwpck_require__(5260);
+/* harmony import */ var _actions_io__WEBPACK_IMPORTED_MODULE_7__ = __nccwpck_require__(8701);
+/* harmony import */ var crypto__WEBPACK_IMPORTED_MODULE_8__ = __nccwpck_require__(6982);
+/* harmony import */ var crypto__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__nccwpck_require__.n(crypto__WEBPACK_IMPORTED_MODULE_8__);
+/* harmony import */ var _constants_js__WEBPACK_IMPORTED_MODULE_9__ = __nccwpck_require__(7242);
+
+
+
 
 
 
@@ -31286,6 +31317,11 @@ function getBooleanInput(inputName, defaultValue = false) {
     }
     throw new Error(`Invalid value '${inputValue}' for boolean input '${inputName}'. Expected 'true' or 'false'.`);
 }
+function isJdkCacheEnabled(cache) {
+    return _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .getInput */ .V4(_constants_js__WEBPACK_IMPORTED_MODULE_9__/* .INPUT_CACHE_JDK */ .GL).trim()
+        ? getBooleanInput(_constants_js__WEBPACK_IMPORTED_MODULE_9__/* .INPUT_CACHE_JDK */ .GL)
+        : Boolean(cache.trim());
+}
 function getVersionFromToolcachePath(toolPath) {
     if (toolPath) {
         return path.basename(path.dirname(toolPath));
@@ -31303,13 +31339,155 @@ async function extractJdkFile(toolPath, extension) {
     }
     switch (extension) {
         case 'tar.gz':
+            return await extractTarGz(toolPath);
         case 'tar':
             return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractTar */ .nN(toolPath);
         case 'zip':
-            return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractZip */ .JE(toolPath);
+            return await extractZipArchive(toolPath);
         default:
             return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extract7z */ .$E(toolPath);
     }
+}
+async function createExtractFolder() {
+    const dest = path__WEBPACK_IMPORTED_MODULE_1___default().join(getTempDir(), (0,crypto__WEBPACK_IMPORTED_MODULE_8__.randomUUID)());
+    await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .mkdirP */ .U$(dest);
+    return dest;
+}
+/**
+ * Decompressing a JDK tarball with the default single-threaded gzip is one of the
+ * slowest parts of the install, so hand the decompression to `pigz` when the runner
+ * provides it. Any failure falls back to the stock extraction.
+ */
+async function extractTarGz(toolPath) {
+    const pigzPath = await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .which */ .K7('pigz');
+    // tar splits --use-compress-program on whitespace, so a path containing a
+    // space would be word-split into a bogus command.
+    if (pigzPath && !/\s/.test(pigzPath)) {
+        const dest = await createExtractFolder();
+        try {
+            return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractTar */ .nN(toolPath, dest, [
+                '--use-compress-program',
+                `${pigzPath} -d`,
+                '-x'
+            ]);
+        }
+        catch (error) {
+            await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .rmRF */ .Yz(dest);
+            _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .debug */ .Yz(`Failed to extract '${toolPath}' with pigz, falling back to gzip: ${getErrorMessage(error)}`);
+        }
+    }
+    return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractTar */ .nN(toolPath);
+}
+/**
+ * `tc.extractZip` shells out to PowerShell's `Expand-Archive` on Windows, which is
+ * several times slower than the bundled bsdtar. Prefer `tar.exe` and fall back to
+ * the stock extraction when it is unavailable or fails.
+ */
+async function extractZipArchive(toolPath) {
+    if (process.platform === 'win32') {
+        const systemTar = path__WEBPACK_IMPORTED_MODULE_1___default().join(process.env['SystemRoot'] || 'C:\\Windows', 'System32', 'tar.exe');
+        if (fs__WEBPACK_IMPORTED_MODULE_2__.existsSync(systemTar)) {
+            const dest = await createExtractFolder();
+            try {
+                await _actions_exec__WEBPACK_IMPORTED_MODULE_6__/* .exec */ .m(`"${systemTar}"`, ['-xf', toolPath, '-C', dest], {
+                    silent: true
+                });
+                return dest;
+            }
+            catch (error) {
+                await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .rmRF */ .Yz(dest);
+                _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .debug */ .Yz(`Failed to extract '${toolPath}' with tar.exe, falling back to Expand-Archive: ${getErrorMessage(error)}`);
+            }
+        }
+    }
+    return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractZip */ .JE(toolPath);
+}
+/**
+ * Equivalent of `tc.cacheDir`, but moves the extracted JDK into the tool-cache
+ * instead of copying it. `tc.cacheDir` recursively copies the whole tree, which
+ * means a several hundred megabyte JDK is written to disk twice. The extraction
+ * directory and the tool-cache normally live on the same filesystem, so a rename
+ * is effectively free. Anything unexpected (a different filesystem, or a file
+ * handle held open by anti-virus software on Windows) falls back to the copy.
+ */
+async function cacheJdkDir(sourceDir, toolName, version, architecture) {
+    const destPath = getToolcacheDestination(toolName, version, architecture);
+    if (destPath) {
+        let moved = false;
+        try {
+            // lstat, not stat: renaming a symlinked source would put the link itself
+            // in the tool-cache, leaving a dangling JAVA_HOME once RUNNER_TEMP is
+            // cleaned. tc.cacheDir dereferences it, so let it handle that case.
+            if (fs__WEBPACK_IMPORTED_MODULE_2__.lstatSync(sourceDir).isDirectory()) {
+                await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .rmRF */ .Yz(destPath);
+                await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .rmRF */ .Yz(`${destPath}.complete`);
+                await _actions_io__WEBPACK_IMPORTED_MODULE_7__/* .mkdirP */ .U$(path__WEBPACK_IMPORTED_MODULE_1___default().dirname(destPath));
+                // Renaming is atomic, so a failure here leaves sourceDir untouched and
+                // the copy-based fallback below can still run.
+                fs__WEBPACK_IMPORTED_MODULE_2__.renameSync(sourceDir, destPath);
+                moved = true;
+            }
+        }
+        catch (error) {
+            _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .debug */ .Yz(`Failed to move '${sourceDir}' into the tool-cache, falling back to a copy: ${getErrorMessage(error)}`);
+        }
+        if (moved) {
+            fs__WEBPACK_IMPORTED_MODULE_2__.writeFileSync(`${destPath}.complete`, '');
+            return destPath;
+        }
+    }
+    return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .cacheDir */ .e8(sourceDir, toolName, version, architecture);
+}
+function getJavaVersionFromReleaseFile(javaHome) {
+    const releasePaths = [
+        path__WEBPACK_IMPORTED_MODULE_1___default().join(javaHome, 'release'),
+        path__WEBPACK_IMPORTED_MODULE_1___default().join(javaHome, 'Contents', 'Home', 'release')
+    ];
+    const releasePath = releasePaths.find(candidate => fs__WEBPACK_IMPORTED_MODULE_2__.existsSync(candidate));
+    if (!releasePath) {
+        throw new Error(`Unable to determine the installed Java version: no release file found under '${javaHome}'.`);
+    }
+    const properties = new Map();
+    for (const line of fs__WEBPACK_IMPORTED_MODULE_2__.readFileSync(releasePath, 'utf8').split(/\r?\n/)) {
+        const match = line.match(/^([A-Z0-9_]+)="(.*)"$/);
+        if (match) {
+            properties.set(match[1], match[2]);
+        }
+    }
+    const runtimeVersion = properties.get('JAVA_RUNTIME_VERSION');
+    const runtimeMatch = runtimeVersion?.match(/^(\d+(?:\.\d+)*(?:\+\d+(?:\.\d+)*)?)/);
+    if (runtimeMatch) {
+        return normalizeJavaReleaseVersion(runtimeMatch[1]);
+    }
+    const javaVersion = properties.get('JAVA_VERSION');
+    if (javaVersion && /^\d+(?:\.\d+)*$/.test(javaVersion)) {
+        return normalizeJavaReleaseVersion(javaVersion);
+    }
+    throw new Error(`Unable to determine the installed Java version from '${releasePath}'.`);
+}
+function normalizeJavaReleaseVersion(version) {
+    const [numericVersion, buildVersion] = version.split('+', 2);
+    const components = numericVersion.split('.');
+    while (components.length < 3) {
+        components.push('0');
+    }
+    const mainVersion = components.slice(0, 3).join('.');
+    const build = [
+        ...components.slice(3),
+        ...(buildVersion ? [buildVersion] : [])
+    ];
+    return build.length > 0 ? `${mainVersion}+${build.join('.')}` : mainVersion;
+}
+function getToolcacheDestination(toolName, version, architecture) {
+    const toolcacheRoot = process.env['RUNNER_TOOL_CACHE'];
+    if (!toolcacheRoot) {
+        return null;
+    }
+    // Mirrors the destination layout used by `tc.cacheDir`.
+    return path__WEBPACK_IMPORTED_MODULE_1___default().join(toolcacheRoot, toolName, semver__WEBPACK_IMPORTED_MODULE_3__.clean(version) || version, architecture || os__WEBPACK_IMPORTED_MODULE_0___default().arch());
+}
+function getErrorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
 }
 function getDownloadArchiveExtension() {
     return process.platform === 'win32' ? 'zip' : 'tar.gz';
@@ -31407,7 +31585,7 @@ function getVersionFromFileContent(content, distributionName, versionFile) {
     }
     // Apply DISTRIBUTIONS_ONLY_MAJOR_VERSION logic whenever the effective distribution
     // (either explicitly provided or extracted from the version file) is in the list.
-    if (_constants_js__WEBPACK_IMPORTED_MODULE_6__/* .DISTRIBUTIONS_ONLY_MAJOR_VERSION */ ._V.includes(extractedDistribution || distributionName)) {
+    if (_constants_js__WEBPACK_IMPORTED_MODULE_9__/* .DISTRIBUTIONS_ONLY_MAJOR_VERSION */ ._V.includes(extractedDistribution || distributionName)) {
         const coerceVersion = semver__WEBPACK_IMPORTED_MODULE_3__.coerce(version) ?? version;
         version = semver__WEBPACK_IMPORTED_MODULE_3__.major(coerceVersion).toString();
     }
@@ -31490,8 +31668,43 @@ function convertVersionToSemver(version) {
     }
     return mainVersion;
 }
+/**
+ * Builds a validator for the bytes currently served by a URL from the response
+ * headers of a HEAD request. A vendor's `/latest/` URL never changes, so this
+ * is what lets a republished artifact be told apart from the previous one when
+ * no checksum is published alongside it.
+ *
+ * Returns `undefined` when the response carries no usable validator, in which
+ * case the caller must not treat the URL as a stable identity.
+ */
+function getArtifactFingerprint(headers) {
+    const readHeader = (name) => {
+        const value = headers?.[name];
+        const resolved = Array.isArray(value) ? value[0] : value;
+        return typeof resolved === 'string' && resolved.trim()
+            ? resolved.trim()
+            : undefined;
+    };
+    // A strong or weak ETag already identifies a specific representation.
+    const etag = readHeader('etag');
+    if (etag) {
+        return `etag:${etag}`;
+    }
+    // Otherwise combine the two validators a static file server reliably sends.
+    // Neither alone is sufficient: `last-modified` has one-second granularity and
+    // `content-length` is unchanged by a same-size rebuild.
+    const lastModified = readHeader('last-modified');
+    const contentLength = readHeader('content-length');
+    if (lastModified && contentLength) {
+        return `mtime:${lastModified};length:${contentLength}`;
+    }
+    return undefined;
+}
+function getGitHubToken() {
+    return _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .getInput */ .V4('token') || process.env.GITHUB_TOKEN;
+}
 function getGitHubHttpHeaders() {
-    const resolvedToken = _actions_core__WEBPACK_IMPORTED_MODULE_4__/* .getInput */ .V4('token') || process.env.GITHUB_TOKEN;
+    const resolvedToken = getGitHubToken();
     const auth = !resolvedToken ? undefined : `token ${resolvedToken}`;
     const headers = {
         accept: 'application/vnd.github.VERSION.raw'
@@ -31890,6 +32103,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   dN: () => (/* binding */ exportVariable),
   V4: () => (/* binding */ getInput),
   q3: () => (/* binding */ getMultilineInput),
+  Gu: () => (/* binding */ getState),
   pq: () => (/* binding */ info),
   _o: () => (/* binding */ isDebug),
   LZ: () => (/* binding */ saveState),
@@ -31900,7 +32114,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   $e: () => (/* binding */ warning)
 });
 
-// UNUSED EXPORTS: ExitCode, getBooleanInput, getIDToken, getState, group, markdownSummary, notice, platform, setCommandEcho, summary, toPlatformPath, toPosixPath, toWin32Path
+// UNUSED EXPORTS: ExitCode, getBooleanInput, getIDToken, group, markdownSummary, notice, platform, setCommandEcho, summary, toPlatformPath, toPosixPath, toWin32Path
 
 // EXTERNAL MODULE: external "os"
 var external_os_ = __nccwpck_require__(857);
@@ -36119,6 +36333,7 @@ async function run() {
     const packageType = setup_java_core/* getInput */.V4(constants/* INPUT_JAVA_PACKAGE */.p1);
     const jdkFile = getJdkFileInput();
     const cache = setup_java_core/* getInput */.V4(constants/* INPUT_CACHE */.gk);
+    const cacheJdk = (0,util/* isJdkCacheEnabled */.lN)(cache);
     const cacheDependencyPath = setup_java_core/* getInput */.V4(constants/* INPUT_CACHE_DEPENDENCY_PATH */.At);
     const cachePath = setup_java_core/* getMultilineInput */.q3(constants/* INPUT_CACHE_PATH */.uW);
     const checkLatest = (0,util/* getBooleanInput */.Vt)(constants/* INPUT_CHECK_LATEST */.YM, false);
@@ -36157,6 +36372,7 @@ async function run() {
                 packageType,
                 checkLatest,
                 forceDownload,
+                cacheJdk,
                 setDefault,
                 verifySignature,
                 verifySignaturePublicKey,
@@ -36164,8 +36380,9 @@ async function run() {
                 jdkFile,
                 toolchainIds
             };
+            await validateCacheInput(cache);
             cacheRestore = cache
-                ? startCacheRestore(cache, cacheDependencyPath, cachePath)
+                ? settle(startCacheRestore(cache, cacheDependencyPath, cachePath))
                 : undefined;
             toolchainConfigurations.push(await installVersion(versionInfo.version, installerInputsOptions));
         }
@@ -36179,6 +36396,7 @@ async function run() {
                 packageType,
                 checkLatest,
                 forceDownload,
+                cacheJdk,
                 setDefault,
                 verifySignature,
                 verifySignaturePublicKey,
@@ -36186,8 +36404,9 @@ async function run() {
                 jdkFile,
                 toolchainIds
             };
+            await validateCacheInput(cache);
             cacheRestore = cache
-                ? startCacheRestore(cache, cacheDependencyPath, cachePath)
+                ? settle(startCacheRestore(cache, cacheDependencyPath, cachePath))
                 : undefined;
             for (const [index, version] of versions.entries()) {
                 toolchainConfigurations.push(await installVersion(version, installerInputsOptions, index));
@@ -36202,18 +36421,24 @@ async function run() {
         actionError = error;
     }
     if (cacheRestore) {
-        try {
-            await cacheRestore;
-        }
-        catch (error) {
-            if (!actionError) {
-                actionError = error;
-            }
+        const cacheResult = await cacheRestore;
+        if (cacheResult.status === 'rejected' && !actionError) {
+            actionError = cacheResult.reason;
         }
     }
     if (actionError) {
         setup_java_core/* setFailed */.C1(actionError.message);
     }
+}
+async function validateCacheInput(cache) {
+    if (!cache) {
+        return;
+    }
+    const { validatePackageManager } = await Promise.all(/* import() */[__nccwpck_require__.e(824), __nccwpck_require__.e(971), __nccwpck_require__.e(377)]).then(__nccwpck_require__.bind(__nccwpck_require__, 7377));
+    validatePackageManager(cache);
+}
+function settle(promise) {
+    return promise.then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }));
 }
 if (process.argv[1] === (0,external_url_.fileURLToPath)(import.meta.url)) {
     run();
@@ -36231,12 +36456,13 @@ function getJdkFileInput() {
     return jdkFile || deprecatedJdkFile;
 }
 async function installVersion(version, options, toolchainId = 0) {
-    const { distributionName, jdkFile, architecture, packageType, checkLatest, forceDownload, setDefault, verifySignature, verifySignaturePublicKey, toolchainIds } = options;
+    const { distributionName, jdkFile, architecture, packageType, checkLatest, forceDownload, cacheJdk, setDefault, verifySignature, verifySignaturePublicKey, toolchainIds } = options;
     const installerOptions = {
         architecture,
         packageType,
         checkLatest,
         forceDownload,
+        cacheJdk,
         setDefault,
         verifySignature,
         verifySignaturePublicKey,

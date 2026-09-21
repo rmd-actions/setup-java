@@ -9,14 +9,14 @@ export const modules = {
 /* harmony export */   ZuluDistribution: () => (/* binding */ ZuluDistribution)
 /* harmony export */ });
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(3838);
-/* harmony import */ var _actions_tool_cache__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(9805);
-/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(6928);
-/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(9896);
-/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(fs__WEBPACK_IMPORTED_MODULE_3__);
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(2088);
-/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(semver__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var _base_installer_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(6242);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(6928);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9896);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(fs__WEBPACK_IMPORTED_MODULE_2__);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(2088);
+/* harmony import */ var semver__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(semver__WEBPACK_IMPORTED_MODULE_3__);
+/* harmony import */ var _base_installer_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(6242);
+/* harmony import */ var _platform_types_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(7444);
 /* harmony import */ var _util_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(4527);
 
 
@@ -25,7 +25,7 @@ export const modules = {
 
 
 
-class ZuluDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_5__/* .JavaBase */ .O {
+class ZuluDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_4__/* .JavaBase */ .O {
     constructor(installerOptions) {
         super('Zulu', installerOptions);
     }
@@ -50,8 +50,8 @@ class ZuluDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_5__/*
             .sort((a, b) => {
             // Azul provides two versions: java_version and distro_version
             // we should sort by both fields by descending
-            return (-semver__WEBPACK_IMPORTED_MODULE_4___default().compareBuild(a.version, b.version) ||
-                -semver__WEBPACK_IMPORTED_MODULE_4___default().compareBuild(a.zuluVersion, b.zuluVersion));
+            return (-semver__WEBPACK_IMPORTED_MODULE_3___default().compareBuild(a.version, b.version) ||
+                -semver__WEBPACK_IMPORTED_MODULE_3___default().compareBuild(a.zuluVersion, b.zuluVersion));
         })
             .map((item) => ({
             version: item.version,
@@ -90,9 +90,9 @@ class ZuluDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_5__/*
             javaArchivePath = (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .renameWinArchive */ .n2)(javaArchivePath);
         }
         const extractedJavaPath = await (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .extractJdkFile */ .PE)(javaArchivePath, extension);
-        const archiveName = fs__WEBPACK_IMPORTED_MODULE_3___default().readdirSync(extractedJavaPath)[0];
-        const archivePath = path__WEBPACK_IMPORTED_MODULE_2___default().join(extractedJavaPath, archiveName);
-        const javaPath = await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_1__/* .cacheDir */ .e8(archivePath, this.toolcacheFolderName, this.getToolcacheVersionName(javaRelease.version), this.architecture);
+        const archiveName = fs__WEBPACK_IMPORTED_MODULE_2___default().readdirSync(extractedJavaPath)[0];
+        const archivePath = path__WEBPACK_IMPORTED_MODULE_1___default().join(extractedJavaPath, archiveName);
+        const javaPath = await (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .cacheJdkDir */ .Vj)(archivePath, this.toolcacheFolderName, this.getToolcacheVersionName(javaRelease.version), this.architecture);
         return { version: javaRelease.version, path: javaPath };
     }
     async getAvailableVersions() {
@@ -182,9 +182,10 @@ class ZuluDistribution extends _base_installer_js__WEBPACK_IMPORTED_MODULE_5__/*
             case 'win32':
                 return 'windows';
             case 'linux':
-                // The new Metadata API's "linux" value returns both glibc and musl packages;
-                // use "linux_glibc" to target only glibc, which is what standard runners use.
-                return 'linux_glibc';
+                // The new Metadata API's "linux" value returns both glibc and musl
+                // packages, so target the libc the runner actually has. A glibc JDK
+                // cannot run on Alpine.
+                return (0,_platform_types_js__WEBPACK_IMPORTED_MODULE_5__/* .isAlpineLinux */ .G6)() ? 'linux_musl' : 'linux_glibc';
             default:
                 return process.platform;
         }

@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import * as tc from '@actions/tool-cache';
 import semver from 'semver';
 
 import fs from 'fs';
@@ -7,6 +6,7 @@ import path from 'path';
 
 import {JavaBase} from '../base-installer.js';
 import {
+  cacheJdkDir,
   convertVersionToSemver,
   extractJdkFile,
   getDownloadArchiveExtension,
@@ -15,6 +15,7 @@ import {
   renameWinArchive
 } from '../../util.js';
 import {IDragonwellVersions, IDragonwellAllVersions} from './models.js';
+import {isAlpineLinux} from '../platform-types.js';
 import {
   JavaDownloadRelease,
   JavaInstallerOptions,
@@ -121,7 +122,7 @@ export class DragonwellDistribution extends JavaBase {
     const archivePath = path.join(extractedJavaPath, archiveName);
     const version = this.getToolcacheVersionName(javaRelease.version);
 
-    const javaPath = await tc.cacheDir(
+    const javaPath = await cacheJdkDir(
       archivePath,
       this.toolcacheFolderName,
       version,
@@ -202,6 +203,8 @@ export class DragonwellDistribution extends JavaBase {
     switch (process.platform) {
       case 'win32':
         return 'windows';
+      case 'linux':
+        return isAlpineLinux() ? 'alpine-linux' : 'linux';
       default:
         return process.platform;
     }
