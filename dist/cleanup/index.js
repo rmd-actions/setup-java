@@ -30774,7 +30774,7 @@ module.exports = {
 /* harmony export */   gk: () => (/* binding */ INPUT_CACHE),
 /* harmony export */   wG: () => (/* binding */ INPUT_JOB_STATUS)
 /* harmony export */ });
-/* unused harmony exports MACOS_JAVA_CONTENT_POSTFIX, INPUT_JAVA_VERSION, INPUT_JAVA_VERSION_FILE, INPUT_ARCHITECTURE, INPUT_JAVA_PACKAGE, INPUT_DISTRIBUTION, INPUT_JDK_FILE, INPUT_JDK_FILE_DEPRECATED, INPUT_CHECK_LATEST, INPUT_FORCE_DOWNLOAD, INPUT_SET_DEFAULT, INPUT_PROBLEM_MATCHER, INPUT_VERIFY_SIGNATURE, INPUT_VERIFY_SIGNATURE_PUBLIC_KEY, INPUT_SERVER_ID, INPUT_SERVER_USERNAME_ENV_VAR, INPUT_SERVER_PASSWORD_ENV_VAR, INPUT_SERVER_USERNAME_DEPRECATED, INPUT_SERVER_PASSWORD_DEPRECATED, INPUT_SETTINGS_PATH, INPUT_OVERWRITE_SETTINGS, INPUT_GPG_PRIVATE_KEY, INPUT_GPG_PASSPHRASE_ENV_VAR, INPUT_GPG_PASSPHRASE_DEPRECATED, INPUT_DEFAULT_SERVER_USERNAME, INPUT_DEFAULT_SERVER_PASSWORD, INPUT_DEFAULT_GPG_PRIVATE_KEY, INPUT_DEFAULT_GPG_PASSPHRASE, MAVEN_GPG_PASSPHRASE_DEFAULT_ENV, GPG_PASSPHRASE_PROFILE_ID, INPUT_CACHE_DEPENDENCY_PATH, INPUT_CACHE_PATH, M2_DIR, MVN_SETTINGS_FILE, MVN_TOOLCHAINS_FILE, INPUT_MVN_TOOLCHAIN_ID, INPUT_MVN_TOOLCHAIN_VENDOR, INPUT_SHOW_DOWNLOAD_PROGRESS, MAVEN_ARGS_ENV, MAVEN_NO_TRANSFER_PROGRESS_FLAG, MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG, DISTRIBUTIONS_ONLY_MAJOR_VERSION */
+/* unused harmony exports MACOS_JAVA_CONTENT_POSTFIX, INPUT_JAVA_VERSION, INPUT_JAVA_VERSION_FILE, INPUT_ARCHITECTURE, INPUT_JAVA_PACKAGE, INPUT_DISTRIBUTION, INPUT_JDK_FILE, INPUT_JDK_FILE_DEPRECATED, INPUT_CHECK_LATEST, INPUT_FORCE_DOWNLOAD, INPUT_SET_DEFAULT, INPUT_PROBLEM_MATCHER, INPUT_VERIFY_SIGNATURE, INPUT_VERIFY_SIGNATURE_PUBLIC_KEY, SIGNATURE_VERIFICATION_DOCUMENTATION_URL, SIGNATURE_VERIFICATION_FAILURE_HELP, INPUT_MVN_SERVER_CREDENTIALS, INPUT_MVN_REPOSITORIES, INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL, INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL, INPUT_SERVER_ID, INPUT_SERVER_USERNAME_ENV_VAR, INPUT_SERVER_PASSWORD_ENV_VAR, INPUT_SERVER_USERNAME_DEPRECATED, INPUT_SERVER_PASSWORD_DEPRECATED, INPUT_SETTINGS_PATH, INPUT_OVERWRITE_SETTINGS, INPUT_GPG_PRIVATE_KEY, INPUT_GPG_PASSPHRASE_ENV_VAR, INPUT_GPG_PASSPHRASE_DEPRECATED, INPUT_DEFAULT_SERVER_USERNAME, INPUT_DEFAULT_SERVER_PASSWORD, INPUT_DEFAULT_GPG_PRIVATE_KEY, INPUT_DEFAULT_GPG_PASSPHRASE, MAVEN_GPG_PASSPHRASE_DEFAULT_ENV, GPG_PASSPHRASE_PROFILE_ID, MAVEN_REPOSITORIES_PROFILE_ID, MAVEN_CENTRAL_REPOSITORY_ID, MAVEN_CENTRAL_REPOSITORY_URL, INPUT_CACHE_DEPENDENCY_PATH, INPUT_CACHE_PATH, M2_DIR, MVN_SETTINGS_FILE, MVN_TOOLCHAINS_FILE, INPUT_MVN_TOOLCHAIN_ID, INPUT_MVN_TOOLCHAIN_VENDOR, INPUT_SHOW_DOWNLOAD_PROGRESS, MAVEN_ARGS_ENV, MAVEN_NO_TRANSFER_PROGRESS_FLAG, MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG, DISTRIBUTIONS_ONLY_MAJOR_VERSION */
 const MACOS_JAVA_CONTENT_POSTFIX = 'Contents/Home';
 const INPUT_JAVA_VERSION = 'java-version';
 const INPUT_JAVA_VERSION_FILE = 'java-version-file';
@@ -30789,6 +30789,12 @@ const INPUT_SET_DEFAULT = 'set-default';
 const INPUT_PROBLEM_MATCHER = 'problem-matcher';
 const INPUT_VERIFY_SIGNATURE = 'verify-signature';
 const INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = 'verify-signature-public-key';
+const SIGNATURE_VERIFICATION_DOCUMENTATION_URL = 'https://github.com/actions/setup-java#download-integrity-and-signatures';
+const SIGNATURE_VERIFICATION_FAILURE_HELP = (/* unused pure expression or super */ null && (`If this is a legitimate vendor signing-key rotation, see ${SIGNATURE_VERIFICATION_DOCUMENTATION_URL} for instructions to configure the updated public key or temporarily disable signature verification.`));
+const INPUT_MVN_SERVER_CREDENTIALS = 'mvn-server-credentials';
+const INPUT_MVN_REPOSITORIES = 'mvn-repositories';
+const INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL = 'mvn-repositories-include-central';
+const INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL = 'mvn-repositories-prioritize-central';
 const INPUT_SERVER_ID = 'server-id';
 const INPUT_SERVER_USERNAME_ENV_VAR = 'server-username-env-var';
 const INPUT_SERVER_PASSWORD_ENV_VAR = 'server-password-env-var';
@@ -30809,6 +30815,9 @@ const INPUT_DEFAULT_GPG_PASSPHRASE = 'GPG_PASSPHRASE';
 const MAVEN_GPG_PASSPHRASE_DEFAULT_ENV = 'MAVEN_GPG_PASSPHRASE';
 // Id of the settings.xml profile used to set `gpg.passphraseEnvName`.
 const GPG_PASSPHRASE_PROFILE_ID = 'setup-java-gpg';
+const MAVEN_REPOSITORIES_PROFILE_ID = 'setup-java-repositories';
+const MAVEN_CENTRAL_REPOSITORY_ID = 'central';
+const MAVEN_CENTRAL_REPOSITORY_URL = 'https://repo.maven.apache.org/maven2';
 const INPUT_CACHE = 'cache';
 const INPUT_CACHE_JDK = 'cache-jdk';
 const INPUT_CACHE_DEPENDENCY_PATH = 'cache-dependency-path';
@@ -30898,7 +30907,9 @@ async function extractJdkFile(toolPath, extension) {
     if (!extension) {
         extension = toolPath.endsWith('.tar.gz')
             ? 'tar.gz'
-            : path.extname(toolPath);
+            : toolPath.endsWith('.tar.xz')
+                ? 'tar.xz'
+                : path.extname(toolPath);
         if (extension.startsWith('.')) {
             extension = extension.substring(1);
         }
@@ -30906,6 +30917,8 @@ async function extractJdkFile(toolPath, extension) {
     switch (extension) {
         case 'tar.gz':
             return await extractTarGz(toolPath);
+        case 'tar.xz':
+            return await tc.extractTar(toolPath, undefined, 'xJ');
         case 'tar':
             return await tc.extractTar(toolPath);
         case 'zip':
@@ -35564,6 +35577,9 @@ function _unique(values) {
 /******/ __nccwpck_require__.m = __webpack_modules__;
 /******/ 
 /************************************************************************/
+/******/ /* webpack/runtime/asset-relocator-loader */
+/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = decodeURIComponent(new URL('.', import.meta.url).pathname).slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
+/******/ 
 /******/ /* webpack/runtime/compat get default export */
 /******/ (() => {
 /******/ 	// getDefaultExport function for compatibility with non-harmony modules
@@ -35656,10 +35672,6 @@ function _unique(values) {
 /******/ 	};
 /******/ })();
 /******/ 
-/******/ /* webpack/runtime/compat */
-/******/ 
-/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
-/******/ 
 /******/ /* webpack/runtime/import chunk loading */
 /******/ (() => {
 /******/ 	// no baseURI
@@ -35735,6 +35747,7 @@ __nccwpck_require__.d(__webpack_exports__, {
 var cleanup_java_core = __nccwpck_require__(3838);
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
+var external_fs_default = /*#__PURE__*/__nccwpck_require__.n(external_fs_);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
 // EXTERNAL MODULE: external "crypto"
@@ -35757,6 +35770,9 @@ var src_util = __nccwpck_require__(4527);
 
 const GPG_HOME_PREFIX = 'setup-java-gpg-';
 const VERIFY_GPG_HOME_PREFIX = 'verify-signature-gpg-home-';
+async function isGpgAvailable() {
+    return Boolean(await io.which('gpg', false));
+}
 // Convert a Windows path (D:\a\_temp\...) to a POSIX path (/d/a/_temp/...).
 // The Git-bundled GPG on Windows (MSYS2-based) uses POSIX path conventions
 // internally. Passing Windows paths with backslashes can cause fatal GPG errors
@@ -35768,8 +35784,8 @@ function toGpgPath(p) {
         .replace(/\\/g, '/')
         .replace(/^([A-Za-z]):\//, (_, drive) => `/${drive.toLowerCase()}/`);
 }
-function createGpgHome(prefix) {
-    const gpgHome = fs.mkdtempSync(path.join(util.getTempDir(), prefix));
+function createGpgHome(prefix, tempDir = util.getTempDir()) {
+    const gpgHome = fs.mkdtempSync(path.join(tempDir, prefix));
     if (process.platform !== 'win32') {
         fs.chmodSync(gpgHome, 0o700);
     }
@@ -35828,7 +35844,9 @@ async function verifyPackageSignature(archivePath, signatureUrl, publicKeyConten
     const signaturePath = await tc.downloadTool(signatureUrl);
     let gpgHome;
     try {
-        gpgHome = createGpgHome(VERIFY_GPG_HOME_PREFIX);
+        // Both RUNNER_TEMP and TMPDIR can exceed macOS's 104-byte agent socket limit.
+        const tempDir = process.platform === 'darwin' ? '/tmp' : util.getTempDir();
+        gpgHome = createGpgHome(VERIFY_GPG_HOME_PREFIX, tempDir);
     }
     catch (error) {
         try {
@@ -35840,15 +35858,21 @@ async function verifyPackageSignature(archivePath, signatureUrl, publicKeyConten
         throw new Error(`Failed to create temporary GPG home directory for signature verification: ${error.message}`, { cause: error });
     }
     try {
-        const publicKeyFile = path.join(gpgHome, 'public-key.asc');
-        fs.writeFileSync(publicKeyFile, publicKeyContent, { encoding: 'utf-8' });
+        const publicKeys = Array.isArray(publicKeyContent)
+            ? publicKeyContent
+            : [publicKeyContent];
+        const publicKeyFiles = publicKeys.map((publicKey, index) => {
+            const publicKeyFile = path.join(gpgHome, `public-key-${index}.asc`);
+            fs.writeFileSync(publicKeyFile, publicKey, { encoding: 'utf-8' });
+            return toGpgPath(publicKeyFile);
+        });
         const options = { silent: true };
         await exec.exec('gpg', [
             '--homedir',
             toGpgPath(gpgHome),
             '--batch',
             '--import',
-            toGpgPath(publicKeyFile)
+            ...publicKeyFiles
         ], options);
         await exec.exec('gpg', [
             '--homedir',
@@ -35869,6 +35893,30 @@ async function verifyPackageSignature(archivePath, signatureUrl, publicKeyConten
 var constants = __nccwpck_require__(7242);
 // EXTERNAL MODULE: external "url"
 var external_url_ = __nccwpck_require__(7016);
+;// CONCATENATED MODULE: ./src/is-main-module.ts
+
+
+function isMainModule(moduleUrl) {
+    const entrypoint = process.argv[1];
+    if (!entrypoint || entrypoint === '-') {
+        return false;
+    }
+    let entrypointPath;
+    try {
+        entrypointPath = external_fs_default().realpathSync(entrypoint);
+    }
+    catch (error) {
+        if (error instanceof Error &&
+            'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+            return false;
+        }
+        throw error;
+    }
+    // Resolve both paths for runtimes using --preserve-symlinks-main.
+    return entrypointPath === external_fs_default().realpathSync((0,external_url_.fileURLToPath)(moduleUrl));
+}
+
 ;// CONCATENATED MODULE: ./src/cleanup-java.ts
 
 
@@ -35936,7 +35984,7 @@ async function run() {
     await cleanup_java_removeGpgHome();
     await ignoreError(saveCaches());
 }
-if (process.argv[1] === (0,external_url_.fileURLToPath)(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
     run();
 }
 else {

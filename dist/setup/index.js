@@ -30772,16 +30772,20 @@ module.exports = {
 /* harmony export */   E8: () => (/* binding */ INPUT_SET_DEFAULT),
 /* harmony export */   Fi: () => (/* binding */ STATE_GPG_HOME),
 /* harmony export */   GL: () => (/* binding */ INPUT_CACHE_JDK),
+/* harmony export */   H5: () => (/* binding */ INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL),
 /* harmony export */   I9: () => (/* binding */ INPUT_FORCE_DOWNLOAD),
 /* harmony export */   K$: () => (/* binding */ GPG_PASSPHRASE_PROFILE_ID),
 /* harmony export */   LS: () => (/* binding */ INPUT_ARCHITECTURE),
+/* harmony export */   MM: () => (/* binding */ INPUT_MVN_SERVER_CREDENTIALS),
 /* harmony export */   OD: () => (/* binding */ INPUT_DEFAULT_GPG_PRIVATE_KEY),
+/* harmony export */   OT: () => (/* binding */ INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL),
 /* harmony export */   PG: () => (/* binding */ MACOS_JAVA_CONTENT_POSTFIX),
 /* harmony export */   QM: () => (/* binding */ INPUT_JAVA_VERSION),
 /* harmony export */   RX: () => (/* binding */ INPUT_DEFAULT_GPG_PASSPHRASE),
 /* harmony export */   TS: () => (/* binding */ INPUT_OVERWRITE_SETTINGS),
 /* harmony export */   TY: () => (/* binding */ INPUT_GPG_PASSPHRASE_DEPRECATED),
 /* harmony export */   Vt: () => (/* binding */ INPUT_SERVER_PASSWORD_DEPRECATED),
+/* harmony export */   W2: () => (/* binding */ INPUT_MVN_REPOSITORIES),
 /* harmony export */   Wj: () => (/* binding */ INPUT_DEFAULT_SERVER_USERNAME),
 /* harmony export */   Wt: () => (/* binding */ INPUT_PROBLEM_MATCHER),
 /* harmony export */   Xh: () => (/* binding */ INPUT_SETTINGS_PATH),
@@ -30792,9 +30796,12 @@ module.exports = {
 /* harmony export */   fd: () => (/* binding */ INPUT_SERVER_ID),
 /* harmony export */   g_: () => (/* binding */ INPUT_DISTRIBUTION),
 /* harmony export */   gk: () => (/* binding */ INPUT_CACHE),
+/* harmony export */   hq: () => (/* binding */ MAVEN_REPOSITORIES_PROFILE_ID),
 /* harmony export */   iT: () => (/* binding */ M2_DIR),
+/* harmony export */   jv: () => (/* binding */ MAVEN_CENTRAL_REPOSITORY_URL),
 /* harmony export */   kM: () => (/* binding */ INPUT_JDK_FILE),
 /* harmony export */   kN: () => (/* binding */ MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG),
+/* harmony export */   kQ: () => (/* binding */ SIGNATURE_VERIFICATION_FAILURE_HELP),
 /* harmony export */   ko: () => (/* binding */ MAVEN_GPG_PASSPHRASE_DEFAULT_ENV),
 /* harmony export */   m7: () => (/* binding */ INPUT_MVN_TOOLCHAIN_VENDOR),
 /* harmony export */   nr: () => (/* binding */ INPUT_MVN_TOOLCHAIN_ID),
@@ -30812,9 +30819,10 @@ module.exports = {
 /* harmony export */   wX: () => (/* binding */ INPUT_SHOW_DOWNLOAD_PROGRESS),
 /* harmony export */   wc: () => (/* binding */ INPUT_JDK_FILE_DEPRECATED),
 /* harmony export */   wz: () => (/* binding */ INPUT_GPG_PRIVATE_KEY),
+/* harmony export */   xg: () => (/* binding */ MAVEN_CENTRAL_REPOSITORY_ID),
 /* harmony export */   xp: () => (/* binding */ INPUT_DEFAULT_SERVER_PASSWORD)
 /* harmony export */ });
-/* unused harmony exports INPUT_CACHE_READ_ONLY, INPUT_JOB_STATUS */
+/* unused harmony exports SIGNATURE_VERIFICATION_DOCUMENTATION_URL, INPUT_CACHE_READ_ONLY, INPUT_JOB_STATUS */
 const MACOS_JAVA_CONTENT_POSTFIX = 'Contents/Home';
 const INPUT_JAVA_VERSION = 'java-version';
 const INPUT_JAVA_VERSION_FILE = 'java-version-file';
@@ -30829,6 +30837,12 @@ const INPUT_SET_DEFAULT = 'set-default';
 const INPUT_PROBLEM_MATCHER = 'problem-matcher';
 const INPUT_VERIFY_SIGNATURE = 'verify-signature';
 const INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = 'verify-signature-public-key';
+const SIGNATURE_VERIFICATION_DOCUMENTATION_URL = 'https://github.com/actions/setup-java#download-integrity-and-signatures';
+const SIGNATURE_VERIFICATION_FAILURE_HELP = `If this is a legitimate vendor signing-key rotation, see ${SIGNATURE_VERIFICATION_DOCUMENTATION_URL} for instructions to configure the updated public key or temporarily disable signature verification.`;
+const INPUT_MVN_SERVER_CREDENTIALS = 'mvn-server-credentials';
+const INPUT_MVN_REPOSITORIES = 'mvn-repositories';
+const INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL = 'mvn-repositories-include-central';
+const INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL = 'mvn-repositories-prioritize-central';
 const INPUT_SERVER_ID = 'server-id';
 const INPUT_SERVER_USERNAME_ENV_VAR = 'server-username-env-var';
 const INPUT_SERVER_PASSWORD_ENV_VAR = 'server-password-env-var';
@@ -30849,6 +30863,9 @@ const INPUT_DEFAULT_GPG_PASSPHRASE = 'GPG_PASSPHRASE';
 const MAVEN_GPG_PASSPHRASE_DEFAULT_ENV = 'MAVEN_GPG_PASSPHRASE';
 // Id of the settings.xml profile used to set `gpg.passphraseEnvName`.
 const GPG_PASSPHRASE_PROFILE_ID = 'setup-java-gpg';
+const MAVEN_REPOSITORIES_PROFILE_ID = 'setup-java-repositories';
+const MAVEN_CENTRAL_REPOSITORY_ID = 'central';
+const MAVEN_CENTRAL_REPOSITORY_URL = 'https://repo.maven.apache.org/maven2';
 const INPUT_CACHE = 'cache';
 const INPUT_CACHE_JDK = 'cache-jdk';
 const INPUT_CACHE_DEPENDENCY_PATH = 'cache-dependency-path';
@@ -30901,6 +30918,7 @@ var JavaDistribution;
     JavaDistribution["JetBrains"] = "jetbrains";
     JavaDistribution["Kona"] = "kona";
     JavaDistribution["OracleOpenJdk"] = "oracle-openjdk";
+    JavaDistribution["RedHat"] = "redhat";
 })(JavaDistribution || (JavaDistribution = {}));
 const JAVA_PACKAGE_CAPABILITIES = {
     [JavaDistribution.Temurin]: ['jdk', 'jre', 'jdk+jmods'],
@@ -30932,7 +30950,8 @@ const JAVA_PACKAGE_CAPABILITIES = {
         'jre+ft'
     ],
     [JavaDistribution.Kona]: ['jdk'],
-    [JavaDistribution.OracleOpenJdk]: ['jdk']
+    [JavaDistribution.OracleOpenJdk]: ['jdk'],
+    [JavaDistribution.RedHat]: ['jdk', 'jre']
 };
 function validateJavaPackage(distributionName, packageType, version) {
     if (!isJavaDistribution(distributionName)) {
@@ -31116,6 +31135,19 @@ const JAVA_PLATFORM_CAPABILITIES = {
             linux: X64_ARM64,
             macos: X64_ARM64,
             windows: ['x64']
+        }
+    },
+    [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.RedHat]: {
+        platforms: {
+            linux: [
+                'x64',
+                { architecture: 'aarch64', versionRange: '<12' },
+                { architecture: 'ppc64le', versionRange: '<12' }
+            ],
+            windows: [
+                { architecture: 'x64', versionRange: '<22' },
+                { architecture: 'x86', versionRange: '<11' }
+            ]
         }
     }
 };
@@ -31332,7 +31364,9 @@ async function extractJdkFile(toolPath, extension) {
     if (!extension) {
         extension = toolPath.endsWith('.tar.gz')
             ? 'tar.gz'
-            : path__WEBPACK_IMPORTED_MODULE_1___default().extname(toolPath);
+            : toolPath.endsWith('.tar.xz')
+                ? 'tar.xz'
+                : path__WEBPACK_IMPORTED_MODULE_1___default().extname(toolPath);
         if (extension.startsWith('.')) {
             extension = extension.substring(1);
         }
@@ -31340,6 +31374,8 @@ async function extractJdkFile(toolPath, extension) {
     switch (extension) {
         case 'tar.gz':
             return await extractTarGz(toolPath);
+        case 'tar.xz':
+            return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractTar */ .nN(toolPath, undefined, 'xJ');
         case 'tar':
             return await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .extractTar */ .nN(toolPath);
         case 'zip':
@@ -36032,6 +36068,9 @@ function _unique(values) {
 /******/ __nccwpck_require__.m = __webpack_modules__;
 /******/ 
 /************************************************************************/
+/******/ /* webpack/runtime/asset-relocator-loader */
+/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = decodeURIComponent(new URL('.', import.meta.url).pathname).slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
+/******/ 
 /******/ /* webpack/runtime/compat get default export */
 /******/ (() => {
 /******/ 	// getDefaultExport function for compatibility with non-harmony modules
@@ -36123,10 +36162,6 @@ function _unique(values) {
 /******/ 		Object.defineProperty(exports, '__esModule', { value: true });
 /******/ 	};
 /******/ })();
-/******/ 
-/******/ /* webpack/runtime/compat */
-/******/ 
-/******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
 /******/ 
 /******/ /* webpack/runtime/import chunk loading */
 /******/ (() => {
@@ -36295,6 +36330,10 @@ async function getJavaDistribution(distributionName, installerOptions, jdkFile) 
             const { OpenJdkDistribution } = await Promise.all(/* import() */[__nccwpck_require__.e(242), __nccwpck_require__.e(735)]).then(__nccwpck_require__.bind(__nccwpck_require__, 3735));
             return new OpenJdkDistribution(normalizedInstallerOptions);
         }
+        case package_types/* JavaDistribution */.zS.RedHat: {
+            const { RedHatDistribution } = await Promise.all(/* import() */[__nccwpck_require__.e(242), __nccwpck_require__.e(228)]).then(__nccwpck_require__.bind(__nccwpck_require__, 8228));
+            return new RedHatDistribution(normalizedInstallerOptions);
+        }
         default:
             return null;
     }
@@ -36315,7 +36354,32 @@ function configureProblemMatcher(matcherPath) {
 
 // EXTERNAL MODULE: ./src/toolchain-ids.ts
 var toolchain_ids = __nccwpck_require__(7083);
+;// CONCATENATED MODULE: ./src/is-main-module.ts
+
+
+function isMainModule(moduleUrl) {
+    const entrypoint = process.argv[1];
+    if (!entrypoint || entrypoint === '-') {
+        return false;
+    }
+    let entrypointPath;
+    try {
+        entrypointPath = external_fs_default().realpathSync(entrypoint);
+    }
+    catch (error) {
+        if (error instanceof Error &&
+            'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+            return false;
+        }
+        throw error;
+    }
+    // Resolve both paths for runtimes using --preserve-symlinks-main.
+    return entrypointPath === external_fs_default().realpathSync((0,external_url_.fileURLToPath)(moduleUrl));
+}
+
 ;// CONCATENATED MODULE: ./src/setup-java.ts
+
 
 
 
@@ -36339,7 +36403,6 @@ async function run() {
     const checkLatest = (0,util/* getBooleanInput */.Vt)(constants/* INPUT_CHECK_LATEST */.YM, false);
     const forceDownload = (0,util/* getBooleanInput */.Vt)(constants/* INPUT_FORCE_DOWNLOAD */.I9, false);
     const setDefault = (0,util/* getBooleanInput */.Vt)(constants/* INPUT_SET_DEFAULT */.E8, true);
-    const verifySignature = (0,util/* getBooleanInput */.Vt)(constants/* INPUT_VERIFY_SIGNATURE */.qy, false);
     const verifySignaturePublicKey = setup_java_core/* getInput */.V4(constants/* INPUT_VERIFY_SIGNATURE_PUBLIC_KEY */.u) || undefined;
     const toolchainIds = setup_java_core/* getMultilineInput */.q3(constants/* INPUT_MVN_TOOLCHAIN_ID */.nr);
     let actionError;
@@ -36367,6 +36430,7 @@ async function run() {
             else if (!distributionName) {
                 throw new Error('distribution input is required when not specified in the version file');
             }
+            const verifySignature = getVerifySignatureInput();
             const installerInputsOptions = {
                 architecture,
                 packageType,
@@ -36391,6 +36455,7 @@ async function run() {
             if (!distributionName) {
                 throw new Error('distribution input is required');
             }
+            const verifySignature = getVerifySignatureInput();
             const installerInputsOptions = {
                 architecture,
                 packageType,
@@ -36440,7 +36505,7 @@ async function validateCacheInput(cache) {
 function settle(promise) {
     return promise.then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }));
 }
-if (process.argv[1] === (0,external_url_.fileURLToPath)(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
     run();
 }
 else {
@@ -36454,6 +36519,11 @@ function getJdkFileInput() {
         setup_java_core/* warning */.$e(`The '${constants/* INPUT_JDK_FILE_DEPRECATED */.wc}' input is deprecated and may be removed in a future release. Please use '${constants/* INPUT_JDK_FILE */.kM}' instead.`);
     }
     return jdkFile || deprecatedJdkFile;
+}
+function getVerifySignatureInput() {
+    return setup_java_core/* getInput */.V4(constants/* INPUT_VERIFY_SIGNATURE */.qy).trim()
+        ? (0,util/* getBooleanInput */.Vt)(constants/* INPUT_VERIFY_SIGNATURE */.qy)
+        : undefined;
 }
 async function installVersion(version, options, toolchainId = 0) {
     const { distributionName, jdkFile, architecture, packageType, checkLatest, forceDownload, cacheJdk, setDefault, verifySignature, verifySignaturePublicKey, toolchainIds } = options;

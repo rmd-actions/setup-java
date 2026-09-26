@@ -39,11 +39,10 @@ inputs:
     required: false
     default: true
   verify-signature:
-    description: 'Verify downloaded Java package signatures when supported by the selected distribution'
+    description: 'Check downloaded Java package signatures when supported by the selected distribution. When omitted, failures produce warnings. Explicitly setting this to true enforces verification and makes failures fatal, including failures caused by an unexpected vendor signing-key rotation.'
     required: false
-    default: false
   verify-signature-public-key:
-    description: 'ASCII-armored GPG public key used to verify the downloaded package signature. Overrides the default bundled key for the selected distribution.'
+    description: 'One or more ASCII-armored GPG public keys used to verify downloaded package signatures. Concatenate multiple armored key blocks. Custom keys replace the bundled keys for the selected distribution.'
     required: false
   server-id:
     description: 'ID of the distributionManagement repository in the pom.xml
@@ -64,6 +63,20 @@ inputs:
   server-password:
     description: 'Deprecated alias for server-password-env-var'
     required: false
+  mvn-server-credentials:
+    description: 'Multiline list of Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. When set, replaces the single server configured by server-id, server-username-env-var, and server-password-env-var.'
+    required: false
+  mvn-repositories:
+    description: 'Multiline list of Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`.'
+    required: false
+  mvn-repositories-include-central:
+    description: 'Include Maven Central in the generated dependency repositories profile. When false, Central is disabled unless an explicit repository with ID `central` is declared.'
+    required: false
+    default: true
+  mvn-repositories-prioritize-central:
+    description: 'Place Maven Central before custom dependency repositories. Has no effect when Maven Central is excluded.'
+    required: false
+    default: true
   settings-path:
     description: 'Path to where the settings.xml file will be written. Default is ~/.m2.'
     required: false
