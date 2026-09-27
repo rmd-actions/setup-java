@@ -9,10 +9,18 @@ import {
 } from '@jest/globals';
 import {fileURLToPath} from 'url';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as io from '@actions/io';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const mockTmpDir = jest.fn(os.tmpdir);
+
+jest.unstable_mockModule('os', () => ({
+  ...os,
+  default: {...os, tmpdir: mockTmpDir},
+  tmpdir: mockTmpDir
+}));
 
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: jest.fn()
@@ -34,6 +42,7 @@ describe('gpg tests', () => {
     await io.rmRF(tempDir);
     await io.mkdirP(tempDir);
     jest.clearAllMocks();
+    mockTmpDir.mockImplementation(os.tmpdir);
     (exec.exec as jest.Mock<any>).mockResolvedValue(0);
   });
 
@@ -222,6 +231,77 @@ describe('gpg tests', () => {
   });
 
   describe('verifyPackageSignature', () => {
+    describe.each(['long', 'canonical macOS'])('%s TMPDIR', tempDirKind => {
+      afterEach(() => {
+        process.env['RUNNER_TEMP'] = tempDir;
+      });
+
+      it.each(['success', 'import failure', 'verification failure'])(
+        'uses a short macOS home or RUNNER_TEMP elsewhere and cleans up after %s',
+        async outcome => {
+          const longRunnerTemp = path.join(
+            tempDir,
+            'long-runner-path-'.repeat(8)
+          );
+          const signaturePath = path.join(tempDir, 'jdk.tar.gz.sig');
+          const expectedParent =
+            process.platform === 'darwin' ? '/tmp' : longRunnerTemp;
+          let gpgHome = '';
+          process.env['RUNNER_TEMP'] = longRunnerTemp;
+          mockTmpDir.mockReturnValue(
+            tempDirKind === 'long'
+              ? longRunnerTemp
+              : `/private/var/folders/ab/${'c'.repeat(31)}/T`
+          );
+          fs.mkdirSync(longRunnerTemp, {recursive: true});
+          fs.writeFileSync(signaturePath, 'signature');
+          (tc.downloadTool as jest.Mock<any>).mockResolvedValue(signaturePath);
+          (exec.exec as jest.Mock<any>).mockImplementation(
+            async (_command: string, args: string[]) => {
+              gpgHome = path.join(expectedParent, path.posix.basename(args[1]));
+              expect(args[1]).toBe(gpg.toGpgPath(gpgHome));
+              if (process.platform === 'darwin') {
+                expect(
+                  Buffer.byteLength(path.join(gpgHome, 'S.gpg-agent.browser'))
+                ).toBeLessThan(104);
+              }
+              expect(
+                fs.readFileSync(path.join(gpgHome, 'public-key-0.asc'), 'utf8')
+              ).toBe('public key');
+              if (process.platform !== 'win32') {
+                expect(fs.statSync(gpgHome).mode & 0o777).toBe(0o700);
+              }
+              if (
+                (outcome === 'import failure' && args.includes('--import')) ||
+                (outcome === 'verification failure' &&
+                  args.includes('--verify'))
+              ) {
+                throw new Error(outcome);
+              }
+              return 0;
+            }
+          );
+
+          const verification = gpg.verifyPackageSignature(
+            path.join(tempDir, 'jdk.tar.gz'),
+            'https://example.com/jdk.tar.gz.sig',
+            'public key'
+          );
+          if (outcome === 'success') {
+            await verification;
+          } else {
+            await expect(verification).rejects.toThrow(outcome);
+          }
+          expect(exec.exec).toHaveBeenCalledTimes(
+            outcome === 'import failure' ? 1 : 2
+          );
+          expect(fs.existsSync(gpgHome)).toBe(false);
+          expect(fs.existsSync(signaturePath)).toBe(false);
+          expect(fs.readdirSync(longRunnerTemp)).toEqual([]);
+        }
+      );
+    });
+
     it('imports bundled key and verifies package', async () => {
       const publicKeyContent =
         '-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest\n-----END PGP PUBLIC KEY BLOCK-----';
@@ -245,7 +325,7 @@ describe('gpg tests', () => {
           expect.any(String),
           '--batch',
           '--import',
-          expect.stringContaining('public-key.asc')
+          expect.stringContaining('public-key-0.asc')
         ],
         expect.objectContaining({silent: true})
       );
@@ -262,6 +342,33 @@ describe('gpg tests', () => {
         ],
         expect.objectContaining({silent: true})
       );
+    });
+
+    it('imports multiple bundled keys before verifying the package', async () => {
+      (tc.downloadTool as jest.Mock<any>).mockResolvedValue(
+        '/tmp/jdk.tar.gz.sig'
+      );
+
+      await gpg.verifyPackageSignature(
+        '/tmp/jdk.tar.gz',
+        'https://example.com/jdk.tar.gz.sig',
+        ['public-key-a', 'public-key-b']
+      );
+
+      expect(exec.exec).toHaveBeenNthCalledWith(
+        1,
+        'gpg',
+        [
+          '--homedir',
+          expect.any(String),
+          '--batch',
+          '--import',
+          expect.stringContaining('public-key-0.asc'),
+          expect.stringContaining('public-key-1.asc')
+        ],
+        expect.objectContaining({silent: true})
+      );
+      expect(exec.exec).toHaveBeenCalledTimes(2);
     });
   });
 });

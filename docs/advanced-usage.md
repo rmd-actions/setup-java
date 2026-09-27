@@ -27,6 +27,7 @@
 - [Testing against different Java distributions](#Testing-against-different-Java-distributions)
 - [Testing against different platforms](#Testing-against-different-platforms)
 - [Publishing using Apache Maven](#Publishing-using-Apache-Maven)
+- [Publishing to multiple Maven servers](#publishing-to-multiple-maven-servers)
 - [Apache Maven with a settings path](#apache-maven-with-a-settings-path)
 - [Maven transfer progress (download logs)](#Maven-transfer-progress-download-logs)
 - [Java problem matcher (compiler annotations)](#java-problem-matcher-compiler-annotations)
@@ -37,15 +38,6 @@
 - [Self-signed certificates and internal CAs (GitHub Enterprise)](#Self-signed-certificates-and-internal-CAs-GitHub-Enterprise)
 
 See [action.yml](../action.yml) for more details on task inputs.
-
-> [!NOTE]
-> The examples on this page reference `actions/setup-java@v6`, which is still in
-> development on the `main` branch and is not yet published as a release tag. To
-> try the V6 features documented here (`cache-jdk`, `force-download`,
-> `problem-matcher`, `cache-path`, `cache-read-only`, `java-version: latest`,
-> `oracle-openjdk`, and the `*-env-var` input names), reference
-> `actions/setup-java@main`. For production workflows use the latest stable
-> release, `actions/setup-java@v5`, as shown in the [README](../README.md).
 
 ## Selecting a Java distribution
 `java-version` and `distribution` select what gets installed. `java-version` may be replaced by `java-version-file`, and `distribution` is optional only when `java-version-file` points to a `.sdkmanrc` or `.tool-versions` file that carries a recognized vendor identifier. In every other case both inputs must be provided. See [Supported distributions](../README.md#Supported-distributions) for a list of available options.
@@ -73,6 +65,19 @@ steps:
       distribution: 'zulu'
       java-version: '25'
       java-package: jdk # optional (jdk, jre, jdk+fx, jre+fx, jdk+crac, or jre+crac) - defaults to jdk
+  - run: java --version
+```
+
+### Red Hat Build of OpenJDK
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'redhat'
+      java-version: '21'
+      java-package: jdk # optional (jdk or jre) - defaults to jdk
   - run: java --version
 ```
 
@@ -328,6 +333,7 @@ The package types have these meanings:
 | `corretto` | `jdk`, `jre` | Accepts major versions only. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
 | `oracle` | `jdk` | Stable Oracle JDK 17 and later only. |
 | `oracle-openjdk` | `jdk` | Installs the GA or early-access JDK builds currently listed or archived on `jdk.java.net`; use a `-ea` version such as `27-ea` for early access. |
+| `redhat` | `jdk`, `jre` | Stable builds only. Version availability follows the Foojay Disco catalog for Red Hat Build of OpenJDK and can lag Red Hat's downloads page. |
 | `dragonwell` | `jdk` | Stable builds only. The current vendor catalog provides Java 8, 11, 17, 21, and 25. |
 | `sapmachine` | `jdk`, `jre` | Follows the SapMachine catalog. Both editions are represented from Java 10 onward, but individual versions and platforms can differ. |
 | `graalvm` | `jdk` | Stable Oracle GraalVM for JDK 17 and later only. |
@@ -533,18 +539,27 @@ tool-cache installation short-circuits setup, so a changed `jdk-file` is not
 re-extracted for a version that is already installed. Use
 `force-download: true` when the archive contents change but the version does not.
 
-The verification identity separates unverified downloads from packages verified
-with the distribution's bundled signing key and from packages verified with each
-custom key. Custom public keys are represented by a SHA-256 fingerprint of
-normalized key material; the key itself is not placed in the cache key, the logs,
-or action state. A verified exact-key hit reuses content that was
-signature-verified when it was downloaded by the run that saved the entry,
-instead of downloading and verifying it again.
+The verification identity separates requests that disable signature verification,
+check and warn without enforcement, or explicitly enforce verification. Disabled
+and check-and-warn requests have the same non-enforcement guarantee, but they are
+kept separate so an entry downloaded with verification disabled cannot prevent a
+later check-and-warn request from attempting verification. The identity also
+separates the distribution's bundled signing keys from custom keys. Custom
+public-key sets are represented by a SHA-256 fingerprint of normalized,
+boundary-delimited key material; the keys themselves are not placed in the cache
+key, the logs, or action state. Enforced requests only restore entries created by
+an enforced request whose signature verification succeeded. Check-and-warn entries
+may have been saved after verification succeeded or after a verification failure
+was reported as a warning.
+
+For signature-verification defaults, enforced failure behavior, and recovery from
+a legitimate vendor signing-key rotation, see
+[Download integrity and signatures](../README.md#download-integrity-and-signatures).
 
 > [!IMPORTANT]
-> The JDK cache **key** is what isolates verification modes and release
-> identity: a JDK cache entry created by an unverified download can never be
-> restored for a request that sets `verify-signature: true`, and vice versa.
+> The JDK cache **key** isolates disabled, check-and-warn, and enforced verification
+> modes as well as release identity. A check-and-warn entry can never be restored
+> for a request that sets `verify-signature: true`, and vice versa.
 > `cache-jdk` does not change how the runner tool cache is used. setup-java
 > first looks for an installation in the runner tool cache — a preinstalled
 > JDK, or one installed by an earlier step of the same job — and uses it as-is. Such an installation is not downloaded again, and its checksum
@@ -634,7 +649,7 @@ absent from a vendor catalog.
 
 | Distribution | Linux | macOS | Windows | Other / version restrictions |
 | --- | --- | --- | --- | --- |
-| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
+| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `riscv64`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
 | `zulu` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | |
 | `liberica` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Solaris: `x64`. |
 | `liberica-nik` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
@@ -643,6 +658,7 @@ absent from a vendor catalog.
 | `corretto` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86` | `x86` is limited to Java 11 or earlier; Linux `armv7` is available for Java 11. |
 | `oracle` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
 | `oracle-openjdk` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
+| `redhat` | `x64`, `aarch64`, `ppc64le` | — | `x64`, `x86` | Linux requires glibc; Alpine is unsupported. Linux `aarch64` and `ppc64le` are limited to Java 11 or earlier. Windows `x64` is limited to Java 21 or earlier and `x86` to Java 10 or earlier. |
 | `dragonwell` | `x64`, `aarch64` | — | `x64` | |
 | `sapmachine` | `x64`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `aarch64` | |
 | `graalvm`, `graalvm-community` | `x64`, `aarch64` | `x64`, `aarch64` | `x64` | |
@@ -862,6 +878,125 @@ The two `settings.xml` files created from the above example look like the follow
 ***NOTE***: The generated `settings.xml` sets `<interactiveMode>false</interactiveMode>` so that Maven never blocks a CI run waiting on an interactive prompt. This is applied automatically whenever the action generates `settings.xml`.
 
 If you don't want to overwrite the `settings.xml` file, you can set `overwrite-settings: false`
+
+### Publishing to multiple Maven servers
+
+Use `mvn-server-credentials` to add more than one credential entry to the generated `settings.xml`. Each line has the format `server-id:USERNAME_ENV:PASSWORD_ENV`. The username and password fields are environment variable names, not credential values.
+
+When this input is set, it replaces the single server configured by `server-id`, `server-username-env-var`, and `server-password-env-var`.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - name: Set up release and snapshot repositories
+    uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        releases:RELEASES_USERNAME:RELEASES_PASSWORD
+        snapshots:SNAPSHOTS_USERNAME:SNAPSHOTS_PASSWORD
+  - name: Publish with Maven
+    run: mvn deploy
+    env:
+      RELEASES_USERNAME: ${{ secrets.RELEASES_USERNAME }}
+      RELEASES_PASSWORD: ${{ secrets.RELEASES_PASSWORD }}
+      SNAPSHOTS_USERNAME: ${{ secrets.SNAPSHOTS_USERNAME }}
+      SNAPSHOTS_PASSWORD: ${{ secrets.SNAPSHOTS_PASSWORD }}
+```
+
+This configuration produces the following server entries:
+
+```xml
+<servers>
+  <server>
+    <id>releases</id>
+    <username>${env.RELEASES_USERNAME}</username>
+    <password>${env.RELEASES_PASSWORD}</password>
+  </server>
+  <server>
+    <id>snapshots</id>
+    <username>${env.SNAPSHOTS_USERNAME}</username>
+    <password>${env.SNAPSHOTS_PASSWORD}</password>
+  </server>
+</servers>
+```
+
+### Resolving Maven dependencies from custom repositories
+
+Use `mvn-repositories` when Maven must download dependencies from repositories
+outside Maven Central. Each line has the format
+`repository-id:repository-url:snapshots-enabled`. The parser uses the first and
+last colons as separators, so repository URLs can contain a scheme or port.
+
+The repository ID can match a `mvn-server-credentials` server ID to authenticate
+requests to a private repository:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - name: Set up Java and private Maven repositories
+    uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        private:PRIVATE_REPOSITORY_USERNAME:PRIVATE_REPOSITORY_TOKEN
+      mvn-repositories: |
+        private:https://maven.example.com:8443/releases:false
+        snapshots:https://maven.example.com:8443/snapshots:true
+      mvn-repositories-include-central: true
+      mvn-repositories-prioritize-central: true
+  - run: mvn --batch-mode verify
+    env:
+      PRIVATE_REPOSITORY_USERNAME: ${{ secrets.PRIVATE_REPOSITORY_USERNAME }}
+      PRIVATE_REPOSITORY_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+```
+
+This configuration adds the following active profile to `settings.xml`:
+
+```xml
+<profiles>
+  <profile>
+    <id>setup-java-repositories</id>
+    <repositories>
+      <repository>
+        <id>central</id>
+        <url>https://repo.maven.apache.org/maven2</url>
+        <snapshots>
+          <enabled>false</enabled>
+        </snapshots>
+      </repository>
+      <repository>
+        <id>private</id>
+        <url>https://maven.example.com:8443/releases</url>
+        <snapshots>
+          <enabled>false</enabled>
+        </snapshots>
+      </repository>
+      <repository>
+        <id>snapshots</id>
+        <url>https://maven.example.com:8443/snapshots</url>
+        <snapshots>
+          <enabled>true</enabled>
+        </snapshots>
+      </repository>
+    </repositories>
+  </profile>
+</profiles>
+<activeProfiles>
+  <activeProfile>setup-java-repositories</activeProfile>
+</activeProfiles>
+```
+
+Maven Central is included first by default. Set
+`mvn-repositories-prioritize-central: false` to place custom repositories
+first, or set `mvn-repositories-include-central: false` to disable Central. The
+generated profile overrides the Central repository inherited from Maven's Super
+POM with releases and snapshots disabled. When automatic Central inclusion is
+off, the ID `central` may instead be declared explicitly in `mvn-repositories`
+to replace it with a user-specified repository; otherwise that ID is reserved
+to prevent duplicate entries.
 
 ### GPG
 

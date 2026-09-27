@@ -9,12 +9,13 @@ import {
   getToolcachePath,
   isVersionSatisfies
 } from '../util.js';
-import {
+import type {
   ChecksumAlgorithm,
   ChecksumMetadata,
   JavaDownloadRelease,
   JavaInstallerOptions,
-  JavaInstallerResults
+  JavaInstallerResults,
+  SignatureVerificationKey
 } from './base-models.js';
 import {MACOS_JAVA_CONTENT_POSTFIX} from '../constants.js';
 import {RetryingHttpClient} from '../retrying-http-client.js';
@@ -44,7 +45,8 @@ export abstract class JavaBase {
   private floatingVersionVerified = false;
   protected setDefault: boolean;
   protected verifySignature: boolean;
-  protected verifySignaturePublicKey: string | undefined;
+  protected verifySignatureExplicitlyRequested: boolean;
+  protected verifySignaturePublicKey: SignatureVerificationKey | undefined;
 
   constructor(
     protected distribution: string,
@@ -68,7 +70,10 @@ export abstract class JavaBase {
       installerOptions.setDefault !== undefined
         ? installerOptions.setDefault
         : true;
-    this.verifySignature = installerOptions.verifySignature ?? false;
+    this.verifySignature =
+      installerOptions.verifySignature ?? this.supportsSignatureVerification();
+    this.verifySignatureExplicitlyRequested =
+      installerOptions.verifySignature === true;
     this.verifySignaturePublicKey = installerOptions.verifySignaturePublicKey;
   }
 
@@ -368,6 +373,7 @@ export abstract class JavaBase {
       source: this.getJdkReleaseIdentity(javaRelease),
       verification: getJdkVerificationIdentity(
         this.verifySignature,
+        this.verifySignatureExplicitlyRequested,
         this.verifySignaturePublicKey
       ),
       path: this.getJdkCachePath(javaRelease.version)
