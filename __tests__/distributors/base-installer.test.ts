@@ -71,8 +71,11 @@ jest.unstable_mockModule('@actions/tool-cache', () => ({
 }));
 
 jest.unstable_mockModule('../../src/jdk-cache.js', () => ({
-  getJdkVerificationIdentity: jest.fn((verified: boolean, key?: string) =>
-    verified ? (key ? 'verified:custom' : 'verified:bundled') : 'unverified'
+  getJdkVerificationIdentity: jest.fn(
+    (verified: boolean, enforced: boolean, key?: string) =>
+      verified
+        ? `${enforced ? 'enforced' : 'check-and-warn'}:${key ? 'custom' : 'bundled'}`
+        : 'disabled'
   ),
   registerJdk: jest.fn(),
   restoreJdk: jest.fn()
@@ -395,8 +398,10 @@ describe('setupJava', () => {
 
   beforeEach(() => {
     (jdkCache.getJdkVerificationIdentity as jest.Mock).mockImplementation(
-      (verified: boolean, key?: string) =>
-        verified ? (key ? 'verified:custom' : 'verified:bundled') : 'unverified'
+      (verified: boolean, enforced: boolean, key?: string) =>
+        verified
+          ? `${enforced ? 'enforced' : 'check-and-warn'}:${key ? 'custom' : 'bundled'}`
+          : 'disabled'
     );
     spyGetToolcachePath = util.getToolcachePath as jest.Mock;
     spyGetToolcachePath.mockImplementation(
@@ -826,7 +831,7 @@ describe('setupJava', () => {
     expect(jdkCache.registerJdk).toHaveBeenCalledWith(
       expect.objectContaining({
         version: actualJavaVersion,
-        verification: 'unverified'
+        verification: 'disabled'
       })
     );
   });
@@ -886,7 +891,7 @@ describe('setupJava', () => {
       architecture: 'x86',
       version: actualJavaVersion,
       source: `some/random_url/java/${actualJavaVersion}`,
-      verification: 'unverified',
+      verification: 'disabled',
       path: path.join(toolCachePath, 'Java_Empty_jdk', actualJavaVersion)
     });
     expect(downloadTool).not.toHaveBeenCalled();
@@ -919,7 +924,7 @@ describe('setupJava', () => {
       architecture: 'x86',
       version: actualJavaVersion,
       source: `some/random_url/java/${actualJavaVersion}`,
-      verification: 'unverified',
+      verification: 'disabled',
       path: path.join(toolCachePath, 'Java_Empty_jdk', actualJavaVersion)
     };
     expect(jdkCache.restoreJdk).toHaveBeenCalledWith(expectedIdentity);
@@ -1753,6 +1758,8 @@ describe('normalizeVersion', () => {
     ['11.0.9.1', {version: '11.0.9+1', stable: true, latest: false}],
     ['12.0.2.1.0', {version: '12.0.2+1.0', stable: true, latest: false}],
     ['18.0.1.1-ea', {version: '18.0.1+1', stable: false, latest: false}],
+    ['26.0.2.1+1', {version: '26.0.2+1.1', stable: true, latest: false}],
+    ['25.0.4.1+1', {version: '25.0.4+1.1', stable: true, latest: false}],
     ['latest', {version: 'x', stable: true, latest: true}],
     ['LATEST', {version: 'x', stable: true, latest: true}],
     ['  Latest  ', {version: 'x', stable: true, latest: true}]

@@ -1,5 +1,5 @@
 import semver from 'semver';
-import {convertVersionToSemver} from '../util.js';
+import {normalizeJavaVersionToSemver} from '../util.js';
 
 export enum JavaDistribution {
   Temurin = 'temurin',
@@ -17,7 +17,8 @@ export enum JavaDistribution {
   GraalVMCommunity = 'graalvm-community',
   JetBrains = 'jetbrains',
   Kona = 'kona',
-  OracleOpenJdk = 'oracle-openjdk'
+  OracleOpenJdk = 'oracle-openjdk',
+  RedHat = 'redhat'
 }
 
 export const JAVA_PACKAGE_CAPABILITIES = {
@@ -50,7 +51,8 @@ export const JAVA_PACKAGE_CAPABILITIES = {
     'jre+ft'
   ],
   [JavaDistribution.Kona]: ['jdk'],
-  [JavaDistribution.OracleOpenJdk]: ['jdk']
+  [JavaDistribution.OracleOpenJdk]: ['jdk'],
+  [JavaDistribution.RedHat]: ['jdk', 'jre']
 } as const satisfies Record<JavaDistribution, readonly string[]>;
 
 export function validateJavaPackage(
@@ -96,12 +98,9 @@ function canResolveTemurinJmods(version: string): boolean {
     return true;
   }
 
-  let normalizedRange = normalizedVersion
-    .replace(/-ea$/, '')
-    .replace('-ea.', '+');
-  if (/^\d+(\.\d+){3,}$/.test(normalizedRange)) {
-    normalizedRange = convertVersionToSemver(normalizedRange);
-  }
+  const normalizedRange = normalizeJavaVersionToSemver(
+    normalizedVersion.replace(/-ea$/, '').replace('-ea.', '+')
+  );
   if (!semver.validRange(normalizedRange)) {
     // JavaBase owns general version validation and its targeted error messages.
     return true;

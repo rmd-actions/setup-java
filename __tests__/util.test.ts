@@ -43,6 +43,7 @@ const core = await import('@actions/core');
 
 const {
   convertVersionToSemver,
+  normalizeJavaVersionToSemver,
   getNextPageUrlFromLinkHeader,
   getVersionFromFileContent,
   isVersionSatisfies,
@@ -188,6 +189,22 @@ describe('convertVersionToSemver', () => {
   });
 });
 
+describe('normalizeJavaVersionToSemver', () => {
+  it.each([
+    ['17', '17'],
+    ['17.0.8', '17.0.8'],
+    ['17.0.8+7', '17.0.8+7'],
+    ['11.0.9.1', '11.0.9+1'],
+    ['12.0.2.1.0', '12.0.2+1.0'],
+    ['26.0.2.1+1', '26.0.2+1.1'],
+    ['17.0.8.1+1080.1', '17.0.8+1.1080.1'],
+    ['>=11.0.9.1', '>=11.0.9.1'],
+    ['17.x', '17.x']
+  ])('%s -> %s', (input: string, expected: string) => {
+    expect(normalizeJavaVersionToSemver(input)).toBe(expected);
+  });
+});
+
 describe('getNextPageUrlFromLinkHeader', () => {
   it.each([
     [
@@ -263,6 +280,7 @@ describe('validatePaginationUrl', () => {
 describe('getVersionFromFileContent', () => {
   describe('.sdkmanrc', () => {
     it.each([
+      ['java=26-tem', '26', 'temurin'],
       ['java=11.0.20.1-tem', '11.0.20', 'temurin'],
       ['java = 11.0.20.1-tem', '11.0.20', 'temurin'],
       ['java=11.0.20.1-tem # a comment in sdkmanrc', '11.0.20', 'temurin'],
@@ -275,6 +293,8 @@ describe('getVersionFromFileContent', () => {
       ['java=21.0.5-graal', '21.0.5', 'graalvm'],
       ['java=17.0.9-graalce', '17.0.9', 'graalvm'],
       ['java=11.0.25-librca', '11.0.25', 'liberica'],
+      ['java=25.0.4+1.1-librca', '25.0.4+1.1', 'liberica'],
+      ['java=25.0.4+1.1-zulu', '25.0.4+1.1', 'zulu'],
       ['java=11.0.25-ms', '11.0.25', 'microsoft'],
       ['java=21.0.5-oracle', '21.0.5', 'oracle'],
       ['java=11.0.25-sapmchn', '11.0.25', 'sapmachine'],

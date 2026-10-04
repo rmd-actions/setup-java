@@ -5,16 +5,17 @@ import semver from 'semver';
 import path from 'path';
 import * as httpm from '@actions/http-client';
 import {
-  convertVersionToSemver,
   getToolcachePath,
-  isVersionSatisfies
+  isVersionSatisfies,
+  normalizeJavaVersionToSemver
 } from '../util.js';
-import {
+import type {
   ChecksumAlgorithm,
   ChecksumMetadata,
   JavaDownloadRelease,
   JavaInstallerOptions,
-  JavaInstallerResults
+  JavaInstallerResults,
+  SignatureVerificationKey
 } from './base-models.js';
 import {MACOS_JAVA_CONTENT_POSTFIX} from '../constants.js';
 import {RetryingHttpClient} from '../retrying-http-client.js';
@@ -44,7 +45,8 @@ export abstract class JavaBase {
   private floatingVersionVerified = false;
   protected setDefault: boolean;
   protected verifySignature: boolean;
-  protected verifySignaturePublicKey: string | undefined;
+  protected verifySignatureExplicitlyRequested: boolean;
+  protected verifySignaturePublicKey: SignatureVerificationKey | undefined;
 
   constructor(
     protected distribution: string,
@@ -68,7 +70,10 @@ export abstract class JavaBase {
       installerOptions.setDefault !== undefined
         ? installerOptions.setDefault
         : true;
-    this.verifySignature = installerOptions.verifySignature ?? false;
+    this.verifySignature =
+      installerOptions.verifySignature ?? this.supportsSignatureVerification();
+    this.verifySignatureExplicitlyRequested =
+      installerOptions.verifySignature === true;
     this.verifySignaturePublicKey = installerOptions.verifySignaturePublicKey;
   }
 
@@ -368,6 +373,7 @@ export abstract class JavaBase {
       source: this.getJdkReleaseIdentity(javaRelease),
       verification: getJdkVerificationIdentity(
         this.verifySignature,
+        this.verifySignatureExplicitlyRequested,
         this.verifySignaturePublicKey
       ),
       path: this.getJdkCachePath(javaRelease.version)
@@ -669,12 +675,9 @@ export abstract class JavaBase {
 
     // Java uses a versioning scheme (JEP 322) that can contain more numeric
     // fields than SemVer allows, e.g. '18.0.1.1' or '11.0.9.1'. Convert such
-    // exact versions to SemVer build notation ('18.0.1+1') so they are
-    // accepted. Ranges and versions that already carry build metadata are
-    // left untouched.
-    if (/^\d+(\.\d+){3,}$/.test(version)) {
-      version = convertVersionToSemver(version);
-    }
+    // exact versions to SemVer build notation ('18.0.1+1', or '26.0.2+1.1'
+    // for '26.0.2.1+1') so they are accepted. Ranges are left untouched.
+    version = normalizeJavaVersionToSemver(version);
 
     if (!semver.validRange(version)) {
       throw new Error(

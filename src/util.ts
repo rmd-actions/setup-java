@@ -59,7 +59,9 @@ export async function extractJdkFile(toolPath: string, extension?: string) {
   if (!extension) {
     extension = toolPath.endsWith('.tar.gz')
       ? 'tar.gz'
-      : path.extname(toolPath);
+      : toolPath.endsWith('.tar.xz')
+        ? 'tar.xz'
+        : path.extname(toolPath);
     if (extension.startsWith('.')) {
       extension = extension.substring(1);
     }
@@ -68,6 +70,8 @@ export async function extractJdkFile(toolPath: string, extension?: string) {
   switch (extension) {
     case 'tar.gz':
       return await extractTarGz(toolPath);
+    case 'tar.xz':
+      return await tc.extractTar(toolPath, undefined, 'xJ');
     case 'tar':
       return await tc.extractTar(toolPath);
     case 'zip':
@@ -504,6 +508,21 @@ export function convertVersionToSemver(version: number[] | string) {
     return `${mainVersion}+${versionArray.slice(3).join('.')}`;
   }
   return mainVersion;
+}
+
+/**
+ * Java versions (JEP 322) can contain more numeric fields than SemVer allows,
+ * e.g. '11.0.9.1' or Temurin respins such as '26.0.2.1+1'. Move the extra
+ * fields into SemVer build metadata ('11.0.9+1', '26.0.2+1.1'). Any other
+ * input (ranges, regular SemVer versions) is returned unchanged.
+ */
+export function normalizeJavaVersionToSemver(version: string): string {
+  const match = /^(\d+(?:\.\d+){3,})(?:\+([0-9A-Za-z.-]+))?$/.exec(version);
+  if (!match) {
+    return version;
+  }
+  const converted = convertVersionToSemver(match[1]);
+  return match[2] ? `${converted}.${match[2]}` : converted;
 }
 
 /**
