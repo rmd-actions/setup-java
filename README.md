@@ -9,21 +9,12 @@ Set up Java for GitHub Actions workflows. `setup-java` installs a requested Java
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
   - run: java --version
 ```
-
-> [!NOTE]
-> V6 is still in development on the `main` branch and is not yet recommended for production workflows. To use it, you must explicitly reference the `main` branch in your workflow, as in 
->
-> ```yaml
-> - uses: actions/setup-java@main
-> ```
-> 
-> For production workflows, it is recommended to use the latest stable release `v5`.
 
 ## Contents
 
@@ -54,15 +45,20 @@ steps:
 
 ## What's new
 
-### V6 (in development)
+### V6
 
 - Migrated the action implementation to ESM to support the latest `@actions/*` packages.
-- Added the `oracle-openjdk` distribution for OpenJDK builds from Oracle.
+- Added Oracle OpenJDK (`oracle-openjdk`), Red Hat Build of OpenJDK (`redhat`), and Liberica Native Image Kit (`liberica-nik`), and expanded Tencent Kona support through JDK 25.
 - Added `java-version: latest` to resolve the newest stable GA release from the distribution's remote metadata.
-- JDK downloads now automatically verify authoritative checksums for [supported distributions](#download-integrity-and-signatures).
+- Expanded install compatibility with JEP 322 multi-field versions such as `18.0.1.1`, Temurin `jdk+jmods` packages, and native musl artifacts on Alpine for Dragonwell, Corretto, Zulu, and Liberica.
+- JDK downloads now automatically verify authoritative checksums, and package signature verification defaults to enabled for Temurin and Microsoft builds.
 - Added `force-download: true` to bypass the tool cache and perform a reproducible fresh install.
 - Dependency caching now supports custom paths with `cache-path` and restore-only operation with `cache-read-only: true`.
+- Dependency cache keys now include `.mvn/extensions.xml` and `gradle.properties`, preventing stale restores when Maven extensions or Gradle dependency properties change.
 - Downloaded JDKs are now [cached](#caching-jdk-installations) automatically when `cache` is set; use `cache-jdk` to enable or disable it independently.
+- Warm JDK-cached jobs can reuse cached release metadata, avoiding vendor API calls while retaining a stale-metadata fallback for vendor outages and rate limits.
+- Maven configuration now supports multiple server credentials and custom dependency-resolution repositories.
+- Maven signing keys are imported into an isolated temporary GPG home instead of the runner's default keyring.
 - Set `problem-matcher: false` to disable Java compiler and uncaught-exception annotations.
 - GraalVM distributions now set `GRAALVM_HOME` in addition to `JAVA_HOME`.
 - Invalid boolean values, unsupported distribution/package/platform combinations, and mismatched Maven toolchain ID counts now fail with targeted errors.
@@ -73,6 +69,7 @@ steps:
 - Deprecated aliases still work, but emit warnings.
 - Maven GPG passphrases are now passed through `gpg.passphraseEnvName` instead of a deprecated `gpg.passphrase` server entry in `settings.xml`. This requires `maven-gpg-plugin` 3.2.0 or newer. See [GPG](docs/advanced-usage.md#gpg).
 - Legacy AdoptOpenJDK distributions were removed. Use `temurin` instead of `adopt` or `adopt-hotspot`, and `semeru` instead of `adopt-openj9`.
+- See the [complete V6 release notes](https://github.com/actions/setup-java/releases/tag/v6.0.0) for all enhancements and fixes.
 
 ### V5
 
@@ -89,7 +86,7 @@ steps:
 ### Older versions
 
 > [!WARNING]
-> `actions/setup-java` versions `v1` through `v4` are deprecated. Upgrade workflows to `actions/setup-java@v5`, the latest stable release.
+> `actions/setup-java` versions `v1` through `v4` are deprecated. Upgrade workflows to `actions/setup-java@v6`, the latest stable release.
 
 ## Usage
 
@@ -98,7 +95,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
@@ -110,7 +107,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: microsoft
       java-version: '25'
@@ -122,7 +119,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version-file: .java-version
@@ -136,7 +133,7 @@ Supported version files are `.java-version`, `.tool-versions`, and `.sdkmanrc`. 
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: latest
@@ -159,7 +156,7 @@ steps:
 | `force-download` | Always download Java and replace any matching version in the tool cache. | `false` |
 | `set-default` | Add Java to `PATH` and set `JAVA_HOME`. When `false`, only version-specific `JAVA_HOME_<major>_<arch>` variables are set. | `true` |
 | `problem-matcher` | Register Java compiler and uncaught exception problem matchers. | `true` |
-| `verify-signature` | Verify downloaded Java package signatures when supported. Currently supported for `temurin` and `microsoft`. | `false` |
+| `verify-signature` | Verify downloaded Java package signatures when supported. Defaults to `true` for `temurin` and `microsoft`, and `false` for other distributions. | Automatically enabled for `temurin` and `microsoft` |
 | `verify-signature-public-key` | ASCII-armored GPG public key to use for signature verification. Overrides the bundled key. | |
 | `token` | Token for fetching GitHub.com-hosted version manifests, useful on GitHub Enterprise Server when unauthenticated requests are rate-limited. | `${{ github.token }}` on GitHub.com; empty string on GHES |
 | `cache` | Enable dependency caching for `maven`, `gradle`, or `sbt`. | |
@@ -170,6 +167,10 @@ steps:
 | `server-id` | Maven repository ID used in generated `settings.xml`. | `github` |
 | `server-username-env-var` | Environment variable name for Maven repository username. | `GITHUB_ACTOR` |
 | `server-password-env-var` | Environment variable name for Maven repository password or token. | `GITHUB_TOKEN` |
+| `mvn-server-credentials` | Multiline Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. Replaces the single server configured by the three inputs above when set. | |
+| `mvn-repositories` | Multiline Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`. | |
+| `mvn-repositories-include-central` | Include Maven Central in the generated dependency repositories profile. When `false`, Central is disabled unless an explicit `central` repository is declared. | `true` |
+| `mvn-repositories-prioritize-central` | Place Maven Central before custom dependency repositories. Has no effect when Maven Central is excluded. | `true` |
 | `settings-path` | Directory where `settings.xml` is written. | `~/.m2` |
 | `overwrite-settings` | Overwrite an existing `settings.xml`. | `true` |
 | `gpg-private-key` | GPG private key to import into an isolated temporary keyring. | |
@@ -207,6 +208,7 @@ Deprecated aliases `jdkFile`, `server-username`, `server-password`, and `gpg-pas
 | `microsoft` | [Microsoft Build of OpenJDK](https://www.microsoft.com/openjdk) | [License](https://docs.microsoft.com/java/openjdk/faq) |
 | `oracle` | [Oracle JDK](https://www.oracle.com/java/technologies/downloads/) | [License](https://java.com/freeuselicense) |
 | `oracle-openjdk` | [Oracle OpenJDK](https://jdk.java.net/) | [License](https://openjdk.org/legal/gplv2+ce.html) |
+| `redhat` | [Red Hat Build of OpenJDK](https://developers.redhat.com/products/openjdk/overview) | [License](https://openjdk.org/legal/gplv2+ce.html) |
 | `sapmachine` | [SAP SapMachine JDK/JRE](https://sapmachine.io/) | [License](https://github.com/SAP/SapMachine/blob/sapmachine/LICENSE) |
 | `semeru` | [IBM Semeru Runtime Open Edition](https://developer.ibm.com/languages/java/semeru-runtimes/downloads/) | [License](https://openjdk.java.net/legal/gplv2+ce.html) |
 | `temurin` | [Eclipse Temurin](https://adoptium.net/) | [License](https://adoptium.net/about.html) |
@@ -262,7 +264,7 @@ Set `cache` to `maven`, `gradle`, or `sbt` to cache dependencies with minimal co
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
@@ -281,7 +283,7 @@ The primary dependency cache key is `setup-java-<runner-os>-<node-arch>-<package
 Use `cache-dependency-path` to override the files used for key hashing, especially in monorepos:
 
 ```yaml
-- uses: actions/setup-java@v5
+- uses: actions/setup-java@v6
   with:
     distribution: temurin
     java-version: '25'
@@ -294,7 +296,7 @@ Use `cache-dependency-path` to override the files used for key hashing, especial
 Use `cache-path` when the build tool stores dependencies outside the default location:
 
 ```yaml
-- uses: actions/setup-java@v5
+- uses: actions/setup-java@v6
   with:
     distribution: temurin
     java-version: '25'
@@ -333,7 +335,7 @@ The JDK cache stores the downloaded JDK installation so later runs skip the down
 Set `cache-read-only: true` to restore dependency, wrapper, and JDK caches without saving changes in the post action. This is useful for pull requests, merge queues, short-lived branches, and matrix fan-out jobs that should only consume caches produced elsewhere.
 
 ```yaml
-- uses: actions/setup-java@v5
+- uses: actions/setup-java@v6
   with:
     distribution: temurin
     java-version: '25'
@@ -349,7 +351,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -364,7 +366,7 @@ jobs:
         goal: [test, verify, package]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -382,7 +384,7 @@ env:
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: '5'
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
@@ -396,7 +398,7 @@ Install multiple Java versions by providing a multiline `java-version` value. Al
 
 ```yaml
 steps:
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: |
@@ -423,7 +425,7 @@ jobs:
     name: Java ${{ matrix.java }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
@@ -440,7 +442,7 @@ jobs:
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
@@ -452,12 +454,17 @@ steps:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+For dependencies hosted outside Maven Central, use `mvn-repositories` to add
+resolution repositories to an active profile in the generated `settings.xml`.
+Repository IDs can match `mvn-server-credentials` IDs when authentication is
+required. See [Resolving Maven dependencies from custom repositories](docs/advanced-usage.md#resolving-maven-dependencies-from-custom-repositories).
+
 ### GPG signing
 
 ```yaml
 steps:
   - uses: actions/checkout@v7
-  - uses: actions/setup-java@v5
+  - uses: actions/setup-java@v6
     with:
       distribution: temurin
       java-version: '25'
@@ -512,7 +519,7 @@ The scripts and documentation in this project are released under the [MIT Licens
 
 ## Contributions
 
-Contributions are welcome. See our [Contributor's Guide](docs/contributors.md).
+Contributions are welcome. See our [Contributor's Guide](docs/CONTRIBUTING.md).
 
 ## Code of Conduct
 
