@@ -51,7 +51,7 @@ steps:
 - Added Oracle OpenJDK (`oracle-openjdk`), Red Hat Build of OpenJDK (`redhat`), and Liberica Native Image Kit (`liberica-nik`), and expanded Tencent Kona support through JDK 25.
 - Added `java-version: latest` to resolve the newest stable GA release from the distribution's remote metadata.
 - Expanded install compatibility with JEP 322 multi-field versions such as `18.0.1.1`, Temurin `jdk+jmods` packages, and native musl artifacts on Alpine for Dragonwell, Corretto, Zulu, and Liberica.
-- JDK downloads now automatically verify authoritative checksums, and package signature verification defaults to enabled for Temurin and Microsoft builds.
+- JDK downloads now automatically verify authoritative checksums. Package signature verification is supported for Temurin and Microsoft builds, with configurable strict enforcement.
 - Added `force-download: true` to bypass the tool cache and perform a reproducible fresh install.
 - Dependency caching now supports custom paths with `cache-path` and restore-only operation with `cache-read-only: true`.
 - Dependency cache keys now include `.mvn/extensions.xml` and `gradle.properties`, preventing stale restores when Maven extensions or Gradle dependency properties change.
@@ -150,14 +150,14 @@ steps:
 | `java-version-file` | Path to `.java-version`, `.tool-versions`, or `.sdkmanrc`. Used when `java-version` is not set. | |
 | `distribution` | Java distribution keyword. Values are case-sensitive and must match one of the supported keywords below. Required unless `java-version-file` points to `.sdkmanrc` with a recognized distribution suffix. | |
 | `java-package` | Package variant such as `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac`, `jdk+jmods`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, or `jre+ft`. Support varies by distribution. | `jdk` |
-| `architecture` | Package architecture. Canonical values are `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, and `s390x`. Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized. | Runner architecture |
+| `architecture` | Package architecture. Canonical values are `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, `riscv64`, and `s390x`. Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized. | Runner architecture |
 | `jdk-file` | Local compressed JDK archive. Requires `distribution: jdkfile`. | |
 | `check-latest` | Check remote metadata for the latest version satisfying the version spec before using the runner tool cache. | `false` |
 | `force-download` | Always download Java and replace any matching version in the tool cache. | `false` |
 | `set-default` | Add Java to `PATH` and set `JAVA_HOME`. When `false`, only version-specific `JAVA_HOME_<major>_<arch>` variables are set. | `true` |
 | `problem-matcher` | Register Java compiler and uncaught exception problem matchers. | `true` |
-| `verify-signature` | Verify downloaded Java package signatures when supported. Defaults to `true` for `temurin` and `microsoft`, and `false` for other distributions. | Automatically enabled for `temurin` and `microsoft` |
-| `verify-signature-public-key` | ASCII-armored GPG public key to use for signature verification. Overrides the bundled key. | |
+| `verify-signature` | Verify downloaded Java package signatures when supported. Explicitly setting this to `true` makes verification failures fatal. | Distribution-dependent; see [Download integrity and signatures](#download-integrity-and-signatures) |
+| `verify-signature-public-key` | One or more ASCII-armored GPG public keys used for signature verification. Concatenate multiple armored key blocks. Custom keys replace the bundled distribution keys. | |
 | `token` | Token for fetching GitHub.com-hosted version manifests, useful on GitHub Enterprise Server when unauthenticated requests are rate-limited. | `${{ github.token }}` on GitHub.com; empty string on GHES |
 | `cache` | Enable dependency caching for `maven`, `gradle`, or `sbt`. | |
 | `cache-jdk` | Cache downloaded JDK installations between jobs. When omitted, JDK caching is enabled only if `cache` is set. Set explicitly to `true` or `false` to override. | Enabled when `cache` is set |
@@ -168,6 +168,7 @@ steps:
 | `server-username-env-var` | Environment variable name for Maven repository username. | `GITHUB_ACTOR` |
 | `server-password-env-var` | Environment variable name for Maven repository password or token. | `GITHUB_TOKEN` |
 | `mvn-server-credentials` | Multiline Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. Replaces the single server configured by the three inputs above when set. | |
+| `mvn-server-repository-origins` | Multiline Maven credential origins in the format `server-id:repository-origin`. Each origin must belong to a configured server ID. Requires Maven 3.10+. | |
 | `mvn-repositories` | Multiline Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`. | |
 | `mvn-repositories-include-central` | Include Maven Central in the generated dependency repositories profile. When `false`, Central is disabled unless an explicit `central` repository is declared. | `true` |
 | `mvn-repositories-prioritize-central` | Place Maven Central before custom dependency repositories. Has no effect when Maven Central is excluded. | `true` |
@@ -233,7 +234,7 @@ Additional distribution notes:
 | --- | --- |
 | Major version | `8`, `11`, `17`, `21`, `25` |
 | Specific feature or patch version | `11.0`, `11.0.4`, `17.0`, `8.0.282+8` |
-| JEP 322 multi-field versions | `11.0.9.1`, `18.0.1.1` |
+| JEP 322 multi-field versions | `11.0.9.1`, `18.0.1.1`, `26.0.2.1+1` |
 | Early access | `15-ea`, `15.0.0-ea`, `27-ea` |
 | Latest stable GA release | `latest` |
 
@@ -247,7 +248,34 @@ GitHub-hosted runners primarily pre-cache Eclipse Temurin JDKs. See the installe
 
 Distributions or individual releases without an authoritative checksum continue to install normally, with the omission reported in debug logs. Installations resolved directly from the runner tool cache — including JDKs preinstalled on the runner image and JDKs installed by an earlier step of the same job — are not downloaded again and are not reverified, even when `verify-signature: true` is set. Use `force-download: true` to always download and verify the archive.
 
-Use `verify-signature: true` to verify package signatures for distributions that support it. Currently supported distributions are `temurin` and `microsoft`; setting it for an unsupported distribution fails the workflow.
+Package signature verification is supported for `temurin` and `microsoft`. When `verify-signature` is omitted, the action checks the signature and warns if GPG is unavailable or verification fails, but does not enforce the result. Explicitly setting `verify-signature: true` enforces verification and makes these failures fatal. Setting `verify-signature: true` for an unsupported distribution also fails the workflow.
+
+> [!WARNING]
+> Requesting explicit signature verification with verify-signature can fail a build after an unexpected but legitimate vendor signing-key rotation, because the action's bundled keys may not yet include the new key. Confirm a new key through the vendor's trusted documentation before using it.
+
+After confirming a legitimate rotation, configure the updated key with `verify-signature-public-key`. The input accepts one or more ASCII-armored public keys; concatenate complete armored key blocks when both old and new vendor keys are needed during a transition. Custom keys replace, rather than extend, the keys bundled with the selected distribution.
+
+```yaml
+- uses: actions/setup-java@v6
+  with:
+    distribution: temurin
+    java-version: '25'
+    verify-signature: true
+    verify-signature-public-key: |
+      -----BEGIN PGP PUBLIC KEY BLOCK-----
+      ...vendor key material...
+      -----END PGP PUBLIC KEY BLOCK-----
+```
+
+As a temporary fallback while a legitimate rotation is being investigated, set `verify-signature: false`. This disables package signature verification, although authoritative checksum verification still applies when the vendor publishes a checksum.
+
+```yaml
+- uses: actions/setup-java@v6
+  with:
+    distribution: temurin
+    java-version: '25'
+    verify-signature: false
+```
 
 ## Caching
 

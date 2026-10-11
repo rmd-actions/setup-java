@@ -17,7 +17,7 @@ inputs:
     required: false
     default: 'jdk'
   architecture:
-    description: "The architecture of the package (`x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, or `s390x`). Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized to `x86`, `x64`, `armv7`, and `aarch64`. Supported values vary by distribution and operating system. Defaults to the action runner's architecture."
+    description: "The architecture of the package (`x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, `riscv64`, or `s390x`). Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized to `x86`, `x64`, `armv7`, and `aarch64`. Supported values vary by distribution and operating system. Defaults to the action runner's architecture."
     required: false
   jdk-file:
     description: 'Path to where the compressed JDK is located'
@@ -39,10 +39,10 @@ inputs:
     required: false
     default: true
   verify-signature:
-    description: 'Verify downloaded Java package signatures when supported by the selected distribution'
+    description: 'Check downloaded Java package signatures when supported by the selected distribution. When omitted, failures produce warnings. Explicitly setting this to true enforces verification and makes failures fatal, including failures caused by an unexpected vendor signing-key rotation.'
     required: false
   verify-signature-public-key:
-    description: 'ASCII-armored GPG public key used to verify the downloaded package signature. Overrides the default bundled key for the selected distribution.'
+    description: 'One or more ASCII-armored GPG public keys used to verify downloaded package signatures. Concatenate multiple armored key blocks. Custom keys replace the bundled keys for the selected distribution.'
     required: false
   server-id:
     description: 'ID of the distributionManagement repository in the pom.xml
@@ -65,6 +65,9 @@ inputs:
     required: false
   mvn-server-credentials:
     description: 'Multiline list of Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. When set, replaces the single server configured by server-id, server-username-env-var, and server-password-env-var.'
+    required: false
+  mvn-server-repository-origins:
+    description: 'Multiline list of Maven credential origins in the format `server-id:repository-origin`. Each origin must belong to a configured server ID. Requires Maven 3.10+.'
     required: false
   mvn-repositories:
     description: 'Multiline list of Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`.'

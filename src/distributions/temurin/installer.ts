@@ -8,7 +8,10 @@ import * as gpg from '../../gpg.js';
 import {ADOPTIUM_PUBLIC_KEY} from './adoptium-key.js';
 import {JavaBase} from '../base-installer.js';
 import {ITemurinAvailableVersions} from './models.js';
-import {MACOS_JAVA_CONTENT_POSTFIX} from '../../constants.js';
+import {
+  MACOS_JAVA_CONTENT_POSTFIX,
+  SIGNATURE_VERIFICATION_FAILURE_HELP
+} from '../../constants.js';
 import {
   JavaDownloadRelease,
   JavaInstallerOptions,
@@ -67,7 +70,7 @@ export class TemurinDistribution extends JavaBase {
         const formattedVersion = this.stable
           ? item.version_data.semver
           : item.version_data.semver.replace('-beta+', '+');
-        return {
+        const release: JavaDownloadRelease = {
           version: formattedVersion,
           url: item.binaries[0].package.link,
           signatureUrl: item.binaries[0].package.signature_link,
@@ -76,11 +79,29 @@ export class TemurinDistribution extends JavaBase {
             value: item.binaries[0].package.checksum,
             source: item.binaries[0].package.checksum_link
           }
-        } as JavaDownloadRelease;
+        };
+        return {
+          release,
+          openjdkVersion: getOpenJdkSemverVersion(item.version_data)
+        };
       });
 
+    // The Adoptium API `semver` folds the JEP 322 patch field into the build
+    // number ('26.0.2.1+1' -> '26.0.2+101') and appends extra metadata for LTS
+    // releases ('25.0.4+7' -> '25.0.4+7.0.LTS'). Exact versions requested by
+    // users follow the OpenJDK notation instead, so also match them against a
+    // key derived from the OpenJDK version fields ('26.0.2+1.1', '25.0.4+7').
+    const isExactBuildRequest = (semver.parse(version)?.build.length ?? 0) > 0;
+
     const satisfiedVersions = availableVersionsWithBinaries
-      .filter(item => isVersionSatisfies(version, item.version))
+      .filter(
+        ({release, openjdkVersion}) =>
+          isVersionSatisfies(version, release.version) ||
+          (isExactBuildRequest &&
+            openjdkVersion !== null &&
+            semver.compareBuild(version, openjdkVersion) === 0)
+      )
+      .map(({release}) => release)
       .sort((a, b) => {
         return -semver.compareBuild(a.version, b.version);
       });
@@ -89,7 +110,7 @@ export class TemurinDistribution extends JavaBase {
       satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
     if (!resolvedFullVersion) {
       const availableVersionStrings = availableVersionsWithBinaries.map(
-        item => item.version
+        ({release}) => release.version
       );
       throw this.createVersionNotFoundError(version, availableVersionStrings);
     }
@@ -141,24 +162,41 @@ export class TemurinDistribution extends JavaBase {
     const archivePath = await this.downloadAndVerify(release);
 
     if (this.verifySignature) {
-      if (!release.signatureUrl) {
-        throw new Error(
-          `Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${release.version}.`
-        );
-      }
-      core.info(`Verifying Java package signature...`);
       try {
-        await gpg.verifyPackageSignature(
-          archivePath,
-          release.signatureUrl,
-          this.verifySignaturePublicKey ?? ADOPTIUM_PUBLIC_KEY
-        );
+        if (!(await gpg.isGpgAvailable())) {
+          throw new Error(
+            "Input 'verify-signature' is enabled, but gpg is not available."
+          );
+        }
+        if (!release.signatureUrl) {
+          throw new Error(
+            `Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${release.version}.`
+          );
+        }
+        core.info(`Verifying Java package signature...`);
+        try {
+          await gpg.verifyPackageSignature(
+            archivePath,
+            release.signatureUrl,
+            this.verifySignaturePublicKey ?? ADOPTIUM_PUBLIC_KEY
+          );
+        } catch (error) {
+          const verificationError = new Error(
+            `Failed to verify signature for Temurin version ${release.version} from ${release.signatureUrl}: ${(error as Error).message} ${SIGNATURE_VERIFICATION_FAILURE_HELP}`,
+            {cause: error}
+          );
+          if (this.verifySignatureExplicitlyRequested) {
+            throw verificationError;
+          } else {
+            core.warning(verificationError.message);
+          }
+        }
       } catch (error) {
-        throw new Error(
-          `Failed to verify signature for Temurin version ${release.version} from ${release.signatureUrl}: ${
-            (error as Error).message
-          }`,
-          {cause: error}
+        if (this.verifySignatureExplicitlyRequested) {
+          throw error;
+        }
+        core.warning(
+          error instanceof Error ? error.message : `Unknown error: ${error}`
         );
       }
     }
@@ -288,4 +326,21 @@ export class TemurinDistribution extends JavaBase {
     const architecture = super.distributionArchitecture();
     return architecture === 'armv7' ? 'arm' : architecture;
   }
+}
+
+/**
+ * Builds a SemVer version from the OpenJDK version fields reported by the
+ * Adoptium API, e.g. '26.0.2.1+1' -> '26.0.2+1.1' and '25.0.4+7-LTS' ->
+ * '25.0.4+7'. Returns null if the fields cannot form a valid SemVer version.
+ */
+function getOpenJdkSemverVersion(
+  versionData: ITemurinAvailableVersions['version_data']
+): string | null {
+  const {major, minor, security, patch, build} = versionData;
+  if (build === undefined || build === null) {
+    return null;
+  }
+  const buildMetadata = patch ? `${patch}.${build}` : `${build}`;
+  const version = `${major}.${minor}.${security}+${buildMetadata}`;
+  return semver.valid(version) ? version : null;
 }

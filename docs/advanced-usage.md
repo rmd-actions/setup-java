@@ -539,18 +539,27 @@ tool-cache installation short-circuits setup, so a changed `jdk-file` is not
 re-extracted for a version that is already installed. Use
 `force-download: true` when the archive contents change but the version does not.
 
-The verification identity separates unverified downloads from packages verified
-with the distribution's bundled signing key and from packages verified with each
-custom key. Custom public keys are represented by a SHA-256 fingerprint of
-normalized key material; the key itself is not placed in the cache key, the logs,
-or action state. A verified exact-key hit reuses content that was
-signature-verified when it was downloaded by the run that saved the entry,
-instead of downloading and verifying it again.
+The verification identity separates requests that disable signature verification,
+check and warn without enforcement, or explicitly enforce verification. Disabled
+and check-and-warn requests have the same non-enforcement guarantee, but they are
+kept separate so an entry downloaded with verification disabled cannot prevent a
+later check-and-warn request from attempting verification. The identity also
+separates the distribution's bundled signing keys from custom keys. Custom
+public-key sets are represented by a SHA-256 fingerprint of normalized,
+boundary-delimited key material; the keys themselves are not placed in the cache
+key, the logs, or action state. Enforced requests only restore entries created by
+an enforced request whose signature verification succeeded. Check-and-warn entries
+may have been saved after verification succeeded or after a verification failure
+was reported as a warning.
+
+For signature-verification defaults, enforced failure behavior, and recovery from
+a legitimate vendor signing-key rotation, see
+[Download integrity and signatures](../README.md#download-integrity-and-signatures).
 
 > [!IMPORTANT]
-> The JDK cache **key** is what isolates verification modes and release
-> identity: a JDK cache entry created by an unverified download can never be
-> restored for a request that sets `verify-signature: true`, and vice versa.
+> The JDK cache **key** isolates disabled, check-and-warn, and enforced verification
+> modes as well as release identity. A check-and-warn entry can never be restored
+> for a request that sets `verify-signature: true`, and vice versa.
 > `cache-jdk` does not change how the runner tool cache is used. setup-java
 > first looks for an installation in the runner tool cache — a preinstalled
 > JDK, or one installed by an earlier step of the same job — and uses it as-is. Such an installation is not downloaded again, and its checksum
@@ -640,7 +649,7 @@ absent from a vendor catalog.
 
 | Distribution | Linux | macOS | Windows | Other / version restrictions |
 | --- | --- | --- | --- | --- |
-| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
+| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `riscv64`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
 | `zulu` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | |
 | `liberica` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Solaris: `x64`. |
 | `liberica-nik` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
@@ -876,6 +885,11 @@ Use `mvn-server-credentials` to add more than one credential entry to the genera
 
 When this input is set, it replaces the single server configured by `server-id`, `server-username-env-var`, and `server-password-env-var`.
 
+Use `mvn-server-repository-origins` when a Maven server credential must be allowed for an explicit repository origin. Each line has the format `server-id:repository-origin`; a server can have multiple origins.
+
+> [!NOTE]
+> `mvn-server-repository-origins` only works with Maven 3.10 and later. Earlier Maven versions ignore the generated `repositoryOrigins` element and log an `Unrecognised tag: 'repositoryOrigins'` warning. GitHub-hosted runners currently ship Maven 3.9.x, so use the [Maven Wrapper](https://maven.apache.org/tools/wrapper/) or install Maven 3.10+ yourself to use this feature.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
@@ -887,6 +901,9 @@ steps:
       mvn-server-credentials: |
         releases:RELEASES_USERNAME:RELEASES_PASSWORD
         snapshots:SNAPSHOTS_USERNAME:SNAPSHOTS_PASSWORD
+      mvn-server-repository-origins: |
+        releases:https://central.sonatype.com
+        snapshots:https://central.sonatype.com
   - name: Publish with Maven
     run: mvn deploy
     env:
@@ -904,11 +921,17 @@ This configuration produces the following server entries:
     <id>releases</id>
     <username>${env.RELEASES_USERNAME}</username>
     <password>${env.RELEASES_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
   <server>
     <id>snapshots</id>
     <username>${env.SNAPSHOTS_USERNAME}</username>
     <password>${env.SNAPSHOTS_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
 </servers>
 ```
