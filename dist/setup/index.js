@@ -30801,6 +30801,7 @@ module.exports = {
 /* harmony export */   jv: () => (/* binding */ MAVEN_CENTRAL_REPOSITORY_URL),
 /* harmony export */   kM: () => (/* binding */ INPUT_JDK_FILE),
 /* harmony export */   kN: () => (/* binding */ MAVEN_NO_TRANSFER_PROGRESS_LONG_FLAG),
+/* harmony export */   kQ: () => (/* binding */ SIGNATURE_VERIFICATION_FAILURE_HELP),
 /* harmony export */   ko: () => (/* binding */ MAVEN_GPG_PASSPHRASE_DEFAULT_ENV),
 /* harmony export */   m7: () => (/* binding */ INPUT_MVN_TOOLCHAIN_VENDOR),
 /* harmony export */   nr: () => (/* binding */ INPUT_MVN_TOOLCHAIN_ID),
@@ -30821,7 +30822,7 @@ module.exports = {
 /* harmony export */   xg: () => (/* binding */ MAVEN_CENTRAL_REPOSITORY_ID),
 /* harmony export */   xp: () => (/* binding */ INPUT_DEFAULT_SERVER_PASSWORD)
 /* harmony export */ });
-/* unused harmony exports INPUT_CACHE_READ_ONLY, INPUT_JOB_STATUS */
+/* unused harmony exports SIGNATURE_VERIFICATION_DOCUMENTATION_URL, INPUT_CACHE_READ_ONLY, INPUT_JOB_STATUS */
 const MACOS_JAVA_CONTENT_POSTFIX = 'Contents/Home';
 const INPUT_JAVA_VERSION = 'java-version';
 const INPUT_JAVA_VERSION_FILE = 'java-version-file';
@@ -30836,6 +30837,8 @@ const INPUT_SET_DEFAULT = 'set-default';
 const INPUT_PROBLEM_MATCHER = 'problem-matcher';
 const INPUT_VERIFY_SIGNATURE = 'verify-signature';
 const INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = 'verify-signature-public-key';
+const SIGNATURE_VERIFICATION_DOCUMENTATION_URL = 'https://github.com/actions/setup-java#download-integrity-and-signatures';
+const SIGNATURE_VERIFICATION_FAILURE_HELP = `If this is a legitimate vendor signing-key rotation, see ${SIGNATURE_VERIFICATION_DOCUMENTATION_URL} for instructions to configure the updated public key or temporarily disable signature verification.`;
 const INPUT_MVN_SERVER_CREDENTIALS = 'mvn-server-credentials';
 const INPUT_MVN_REPOSITORIES = 'mvn-repositories';
 const INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL = 'mvn-repositories-include-central';
@@ -31019,7 +31022,14 @@ function createUnsupportedPackageError(distributionName, packageType, supportedP
 
 
 const X64_ARM64 = ['x64', 'aarch64'];
-const STANDARD_LINUX = ['x64', 'x86', 'aarch64', 'ppc64le', 's390x'];
+const STANDARD_LINUX = [
+    'x64',
+    'x86',
+    'aarch64',
+    'ppc64le',
+    'riscv64',
+    's390x'
+];
 const JAVA_PLATFORM_CAPABILITIES = {
     [_package_types_js__WEBPACK_IMPORTED_MODULE_2__/* .JavaDistribution */ .zS.Temurin]: {
         platforms: {
@@ -31161,6 +31171,7 @@ const CANONICAL_ARCHITECTURES = [
     'aarch64',
     'ppc64le',
     'ppc64',
+    'riscv64',
     's390x'
 ];
 const PLATFORM_ALIASES = {
@@ -36351,7 +36362,32 @@ function configureProblemMatcher(matcherPath) {
 
 // EXTERNAL MODULE: ./src/toolchain-ids.ts
 var toolchain_ids = __nccwpck_require__(7083);
+;// CONCATENATED MODULE: ./src/is-main-module.ts
+
+
+function isMainModule(moduleUrl) {
+    const entrypoint = process.argv[1];
+    if (!entrypoint || entrypoint === '-') {
+        return false;
+    }
+    let entrypointPath;
+    try {
+        entrypointPath = external_fs_default().realpathSync(entrypoint);
+    }
+    catch (error) {
+        if (error instanceof Error &&
+            'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+            return false;
+        }
+        throw error;
+    }
+    // Resolve both paths for runtimes using --preserve-symlinks-main.
+    return entrypointPath === external_fs_default().realpathSync((0,external_url_.fileURLToPath)(moduleUrl));
+}
+
 ;// CONCATENATED MODULE: ./src/setup-java.ts
+
 
 
 
@@ -36477,7 +36513,7 @@ async function validateCacheInput(cache) {
 function settle(promise) {
     return promise.then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }));
 }
-if (process.argv[1] === (0,external_url_.fileURLToPath)(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
     run();
 }
 else {

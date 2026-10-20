@@ -5,10 +5,15 @@ import * as io from '@actions/io';
 import * as exec from '@actions/exec';
 import * as tc from '@actions/tool-cache';
 import * as util from './util.js';
-import {ExecOptions} from '@actions/exec';
+import type {ExecOptions} from '@actions/exec';
+import type {SignatureVerificationKey} from './distributions/base-models.js';
 
 export const GPG_HOME_PREFIX = 'setup-java-gpg-';
 const VERIFY_GPG_HOME_PREFIX = 'verify-signature-gpg-home-';
+
+export async function isGpgAvailable(): Promise<boolean> {
+  return Boolean(await io.which('gpg', false));
+}
 
 // Convert a Windows path (D:\a\_temp\...) to a POSIX path (/d/a/_temp/...).
 // The Git-bundled GPG on Windows (MSYS2-based) uses POSIX path conventions
@@ -21,8 +26,11 @@ export function toGpgPath(p: string): string {
     .replace(/^([A-Za-z]):\//, (_, drive) => `/${drive.toLowerCase()}/`);
 }
 
-function createGpgHome(prefix: string): string {
-  const gpgHome = fs.mkdtempSync(path.join(util.getTempDir(), prefix));
+function createGpgHome(
+  prefix: string,
+  tempDir: string = util.getTempDir()
+): string {
+  const gpgHome = fs.mkdtempSync(path.join(tempDir, prefix));
   if (process.platform !== 'win32') {
     fs.chmodSync(gpgHome, 0o700);
   }
@@ -97,12 +105,14 @@ export async function removeGpgHome(gpgHome: string): Promise<void> {
 export async function verifyPackageSignature(
   archivePath: string,
   signatureUrl: string,
-  publicKeyContent: string
+  publicKeyContent: SignatureVerificationKey
 ) {
   const signaturePath = await tc.downloadTool(signatureUrl);
   let gpgHome: string;
   try {
-    gpgHome = createGpgHome(VERIFY_GPG_HOME_PREFIX);
+    // Both RUNNER_TEMP and TMPDIR can exceed macOS's 104-byte agent socket limit.
+    const tempDir = process.platform === 'darwin' ? '/tmp' : util.getTempDir();
+    gpgHome = createGpgHome(VERIFY_GPG_HOME_PREFIX, tempDir);
   } catch (error) {
     try {
       await io.rmRF(signaturePath);
@@ -117,8 +127,14 @@ export async function verifyPackageSignature(
     );
   }
   try {
-    const publicKeyFile = path.join(gpgHome, 'public-key.asc');
-    fs.writeFileSync(publicKeyFile, publicKeyContent, {encoding: 'utf-8'});
+    const publicKeys = Array.isArray(publicKeyContent)
+      ? publicKeyContent
+      : [publicKeyContent];
+    const publicKeyFiles = publicKeys.map((publicKey, index) => {
+      const publicKeyFile = path.join(gpgHome, `public-key-${index}.asc`);
+      fs.writeFileSync(publicKeyFile, publicKey, {encoding: 'utf-8'});
+      return toGpgPath(publicKeyFile);
+    });
     const options: ExecOptions = {silent: true};
     await exec.exec(
       'gpg',
@@ -127,7 +143,7 @@ export async function verifyPackageSignature(
         toGpgPath(gpgHome),
         '--batch',
         '--import',
-        toGpgPath(publicKeyFile)
+        ...publicKeyFiles
       ],
       options
     );
