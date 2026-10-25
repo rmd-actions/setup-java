@@ -226,6 +226,7 @@ class JavaBase {
     floatingVersionVerified = false;
     setDefault;
     verifySignature;
+    verifySignatureExplicitlyRequested;
     verifySignaturePublicKey;
     constructor(distribution, installerOptions) {
         this.distribution = distribution;
@@ -246,6 +247,8 @@ class JavaBase {
                 : true;
         this.verifySignature =
             installerOptions.verifySignature ?? this.supportsSignatureVerification();
+        this.verifySignatureExplicitlyRequested =
+            installerOptions.verifySignature === true;
         this.verifySignaturePublicKey = installerOptions.verifySignaturePublicKey;
     }
     async downloadAndVerify(javaRelease) {
@@ -375,7 +378,7 @@ class JavaBase {
                         core/* info */.pq(`Java ${foundJava.version} was downloaded`);
                         if (javaRelease.floating) {
                             if (!semver_default().valid(foundJava.version) ||
-                                !(0,util/* isVersionSatisfies */.y)(this.version, foundJava.version)) {
+                                !this.isVersionSatisfied(this.version, foundJava.version)) {
                                 throw new Error(`The downloaded ${this.distribution} artifact reported Java ${foundJava.version}, which does not satisfy '${this.version}'.`);
                             }
                             javaRelease = { ...javaRelease, version: foundJava.version };
@@ -481,7 +484,7 @@ class JavaBase {
             architecture: this.architecture,
             version: javaRelease.version,
             source: this.getJdkReleaseIdentity(javaRelease),
-            verification: getJdkVerificationIdentity(this.verifySignature, this.verifySignaturePublicKey),
+            verification: getJdkVerificationIdentity(this.verifySignature, this.verifySignatureExplicitlyRequested, this.verifySignaturePublicKey),
             path: this.getJdkCachePath(javaRelease.version)
         };
     }
@@ -498,7 +501,7 @@ class JavaBase {
             return javaRelease;
         }
         if (!semver_default().valid(restored.release.version) ||
-            !(0,util/* isVersionSatisfies */.y)(this.version, restored.release.version)) {
+            !this.isVersionSatisfied(this.version, restored.release.version)) {
             core/* debug */.Yz(`Ignoring the cached concrete version '${restored.release.version}' for ${this.distribution} ${this.version}.`);
             return javaRelease;
         }
@@ -681,10 +684,10 @@ class JavaBase {
         })
             .filter(item => item.stable === this.stable);
         const satisfiedVersions = availableVersions
-            .filter(item => (0,util/* isVersionSatisfies */.y)(this.version, item.version))
+            .filter(item => this.isVersionSatisfied(this.version, item.version))
             .filter(item => item.path)
             .sort((a, b) => {
-            return -semver_default().compareBuild(a.version, b.version);
+            return -this.compareVersions(a.version, b.version);
         });
         if (!satisfiedVersions || satisfiedVersions.length === 0) {
             return null;
@@ -693,6 +696,12 @@ class JavaBase {
             version: satisfiedVersions[0].version,
             path: satisfiedVersions[0].path
         };
+    }
+    isVersionSatisfied(range, version) {
+        return (0,util/* isVersionSatisfies */.y)(range, version);
+    }
+    compareVersions(a, b) {
+        return semver_default().compareBuild(a, b);
     }
     normalizeVersion(version) {
         let stable = true;
@@ -727,12 +736,9 @@ class JavaBase {
         }
         // Java uses a versioning scheme (JEP 322) that can contain more numeric
         // fields than SemVer allows, e.g. '18.0.1.1' or '11.0.9.1'. Convert such
-        // exact versions to SemVer build notation ('18.0.1+1') so they are
-        // accepted. Ranges and versions that already carry build metadata are
-        // left untouched.
-        if (/^\d+(\.\d+){3,}$/.test(version)) {
-            version = (0,util/* convertVersionToSemver */.ZY)(version);
-        }
+        // exact versions to SemVer build notation ('18.0.1+1', or '26.0.2+1.1'
+        // for '26.0.2.1+1') so they are accepted. Ranges are left untouched.
+        version = (0,util/* normalizeJavaVersionToSemver */.zZ)(version);
         if (!semver_default().validRange(version)) {
             throw new Error(`The string '${version}' is not valid SemVer notation for a Java version. Please check README file for code snippets and more detailed information`);
         }

@@ -83,6 +83,12 @@ steps:
 
 ### Liberica
 
+Exact patch releases use SDKMAN's `X.Y.Z+P.B` notation, including in `.sdkmanrc`.
+For example, `java=17.0.20+1.1-librca` selects BellSoft's `17.0.20.1+1` release.
+Alternatively, `java-version: '17.0.20.1'` selects the newest build of patch 1,
+whereas `java-version: '17.0.20+1'` selects the exact unpatched build 1.
+Floating versions such as `17` prefer newer patches before comparing build numbers.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
@@ -539,18 +545,27 @@ tool-cache installation short-circuits setup, so a changed `jdk-file` is not
 re-extracted for a version that is already installed. Use
 `force-download: true` when the archive contents change but the version does not.
 
-The verification identity separates unverified downloads from packages verified
-with the distribution's bundled signing key and from packages verified with each
-custom key. Custom public keys are represented by a SHA-256 fingerprint of
-normalized key material; the key itself is not placed in the cache key, the logs,
-or action state. A verified exact-key hit reuses content that was
-signature-verified when it was downloaded by the run that saved the entry,
-instead of downloading and verifying it again.
+The verification identity separates requests that disable signature verification,
+check and warn without enforcement, or explicitly enforce verification. Disabled
+and check-and-warn requests have the same non-enforcement guarantee, but they are
+kept separate so an entry downloaded with verification disabled cannot prevent a
+later check-and-warn request from attempting verification. The identity also
+separates the distribution's bundled signing keys from custom keys. Custom
+public-key sets are represented by a SHA-256 fingerprint of normalized,
+boundary-delimited key material; the keys themselves are not placed in the cache
+key, the logs, or action state. Enforced requests only restore entries created by
+an enforced request whose signature verification succeeded. Check-and-warn entries
+may have been saved after verification succeeded or after a verification failure
+was reported as a warning.
+
+For signature-verification defaults, enforced failure behavior, and recovery from
+a legitimate vendor signing-key rotation, see
+[Download integrity and signatures](../README.md#download-integrity-and-signatures).
 
 > [!IMPORTANT]
-> The JDK cache **key** is what isolates verification modes and release
-> identity: a JDK cache entry created by an unverified download can never be
-> restored for a request that sets `verify-signature: true`, and vice versa.
+> The JDK cache **key** isolates disabled, check-and-warn, and enforced verification
+> modes as well as release identity. A check-and-warn entry can never be restored
+> for a request that sets `verify-signature: true`, and vice versa.
 > `cache-jdk` does not change how the runner tool cache is used. setup-java
 > first looks for an installation in the runner tool cache — a preinstalled
 > JDK, or one installed by an earlier step of the same job — and uses it as-is. Such an installation is not downloaded again, and its checksum
@@ -640,7 +655,7 @@ absent from a vendor catalog.
 
 | Distribution | Linux | macOS | Windows | Other / version restrictions |
 | --- | --- | --- | --- | --- |
-| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
+| `temurin` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le`, `riscv64`, `s390x` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Linux `armv7` is available through Java 17. |
 | `zulu` | `x64`, `x86`, `armv7`, `aarch64` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | |
 | `liberica` | `x64`, `x86`, `armv7`, `aarch64`, `ppc64le` | `x64`, `aarch64` | `x64`, `x86`, `aarch64` | Solaris: `x64`. |
 | `liberica-nik` | `x64`, `aarch64` | `x64`, `aarch64` | `x64`, `aarch64` | |
@@ -876,6 +891,11 @@ Use `mvn-server-credentials` to add more than one credential entry to the genera
 
 When this input is set, it replaces the single server configured by `server-id`, `server-username-env-var`, and `server-password-env-var`.
 
+Use `mvn-server-repository-origins` when a Maven server credential must be allowed for an explicit repository origin. Each line has the format `server-id:repository-origin`; a server can have multiple origins.
+
+> [!NOTE]
+> `mvn-server-repository-origins` only works with Maven 3.10 and later. Earlier Maven versions ignore the generated `repositoryOrigins` element and log an `Unrecognised tag: 'repositoryOrigins'` warning. GitHub-hosted runners currently ship Maven 3.9.x, so use the [Maven Wrapper](https://maven.apache.org/tools/wrapper/) or install Maven 3.10+ yourself to use this feature.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
@@ -887,6 +907,9 @@ steps:
       mvn-server-credentials: |
         releases:RELEASES_USERNAME:RELEASES_PASSWORD
         snapshots:SNAPSHOTS_USERNAME:SNAPSHOTS_PASSWORD
+      mvn-server-repository-origins: |
+        releases:https://central.sonatype.com
+        snapshots:https://central.sonatype.com
   - name: Publish with Maven
     run: mvn deploy
     env:
@@ -904,11 +927,17 @@ This configuration produces the following server entries:
     <id>releases</id>
     <username>${env.RELEASES_USERNAME}</username>
     <password>${env.RELEASES_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
   <server>
     <id>snapshots</id>
     <username>${env.SNAPSHOTS_USERNAME}</username>
     <password>${env.SNAPSHOTS_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
 </servers>
 ```
@@ -980,14 +1009,92 @@ This configuration adds the following active profile to `settings.xml`:
 </activeProfiles>
 ```
 
-Maven Central is included first by default. Set
-`mvn-repositories-prioritize-central: false` to place custom repositories
-first, or set `mvn-repositories-include-central: false` to disable Central. The
-generated profile overrides the Central repository inherited from Maven's Super
-POM with releases and snapshots disabled. When automatic Central inclusion is
-off, the ID `central` may instead be declared explicitly in `mvn-repositories`
-to replace it with a user-specified repository; otherwise that ID is reserved
-to prevent duplicate entries.
+Maven Central is included first by default. The Central controls apply to both
+dependency and plugin repositories. Set
+`mvn-repositories-prioritize-central: false` to place custom repositories first
+within each configured list, or set `mvn-repositories-include-central: false` to
+disable Central for both types. The generated profile overrides the dependency
+and plugin Central repositories inherited from Maven's Super POM with releases
+and snapshots disabled, even if only one custom repository list is supplied.
+These controls have no effect when neither list contains a nonblank entry.
+
+When automatic Central inclusion is off, the ID `central` may instead be
+declared explicitly in `mvn-repositories` or `mvn-plugin-repositories` to replace
+it with a user-specified repository for that type. Declaring it in one list
+does not enable Central in the other. Otherwise that ID is reserved to prevent
+duplicate entries. Other repositories declared in your project's POM are not
+disabled by these controls.
+
+### Resolving Maven plugins from custom repositories
+
+Maven resolves build plugins through `<pluginRepositories>`, separately from
+dependency `<repositories>`. Use `mvn-plugin-repositories` to configure plugin
+resolution with the same multiline `repository-id:repository-url:snapshots-enabled`
+format. It can be supplied without `mvn-repositories`; dependency repositories
+are not automatically used as plugin repositories.
+
+For example, configure the same private repository for dependencies and plugins
+and disable inherited Maven Central for both:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        private:PRIVATE_REPOSITORY_USERNAME:PRIVATE_REPOSITORY_TOKEN
+      mvn-repositories: |
+        private:https://maven.example.com/releases:false
+      mvn-plugin-repositories: |
+        private:https://maven.example.com/releases:false
+      mvn-repositories-include-central: false
+  - run: mvn --batch-mode verify
+    env:
+      PRIVATE_REPOSITORY_USERNAME: ${{ secrets.PRIVATE_REPOSITORY_USERNAME }}
+      PRIVATE_REPOSITORY_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+```
+
+The matching ID `private` selects the same server credentials for both types.
+IDs must be unique within each list, but can be shared across the two lists.
+Public repositories do not require a matching credential entry.
+
+Alongside dependency repositories, the active `setup-java-repositories` profile
+contains:
+
+```xml
+<pluginRepositories>
+  <pluginRepository>
+    <id>private</id>
+    <url>https://maven.example.com/releases</url>
+    <snapshots>
+      <enabled>false</enabled>
+    </snapshots>
+  </pluginRepository>
+  <pluginRepository>
+    <id>central</id>
+    <url>https://repo.maven.apache.org/maven2</url>
+    <releases>
+      <enabled>false</enabled>
+    </releases>
+    <snapshots>
+      <enabled>false</enabled>
+    </snapshots>
+  </pluginRepository>
+</pluginRepositories>
+```
+
+Omitting a Central override would leave the Super POM's plugin repository
+enabled. In particular, `mvn-repositories-include-central: false` now disables
+inherited plugin Central even for existing workflows that only configure
+`mvn-repositories`. To download plugins in such workflows, configure a plugin
+repository or explicitly declare `central` in `mvn-plugin-repositories`.
+
+With Central included, it is placed before custom plugin repositories by
+default; `mvn-repositories-prioritize-central: false` places it after them.
+All repository generation respects `settings-path` and `overwrite-settings`;
+an existing settings file is left untouched when `overwrite-settings: false`.
 
 ### GPG
 
