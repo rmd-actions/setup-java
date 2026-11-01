@@ -150,7 +150,7 @@ steps:
 | `java-version-file` | Path to `.java-version`, `.tool-versions`, or `.sdkmanrc`. Used when `java-version` is not set. | |
 | `distribution` | Java distribution keyword. Values are case-sensitive and must match one of the supported keywords below. Required unless `java-version-file` points to `.sdkmanrc` with a recognized distribution suffix. | |
 | `java-package` | Package variant such as `jdk`, `jre`, `jdk+fx`, `jre+fx`, `jdk+crac`, `jre+crac`, `jdk+jmods`, `jdk+jcef`, `jre+jcef`, `jdk+ft`, or `jre+ft`. Support varies by distribution. | `jdk` |
-| `architecture` | Package architecture. Canonical values are `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, and `s390x`. Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized. | Runner architecture |
+| `architecture` | Package architecture. Canonical values are `x86`, `x64`, `armv7`, `aarch64`, `ppc64le`, `ppc64`, `riscv64`, and `s390x`. Aliases `ia32`, `amd64`, `arm`, and `arm64` are normalized. | Runner architecture |
 | `jdk-file` | Local compressed JDK archive. Requires `distribution: jdkfile`. | |
 | `check-latest` | Check remote metadata for the latest version satisfying the version spec before using the runner tool cache. | `false` |
 | `force-download` | Always download Java and replace any matching version in the tool cache. | `false` |
@@ -168,9 +168,11 @@ steps:
 | `server-username-env-var` | Environment variable name for Maven repository username. | `GITHUB_ACTOR` |
 | `server-password-env-var` | Environment variable name for Maven repository password or token. | `GITHUB_TOKEN` |
 | `mvn-server-credentials` | Multiline Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. Replaces the single server configured by the three inputs above when set. | |
+| `mvn-server-repository-origins` | Multiline Maven credential origins in the format `server-id:repository-origin`. Each origin must belong to a configured server ID. Requires Maven 3.10+. | |
 | `mvn-repositories` | Multiline Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`. | |
-| `mvn-repositories-include-central` | Include Maven Central in the generated dependency repositories profile. When `false`, Central is disabled unless an explicit `central` repository is declared. | `true` |
-| `mvn-repositories-prioritize-central` | Place Maven Central before custom dependency repositories. Has no effect when Maven Central is excluded. | `true` |
+| `mvn-plugin-repositories` | Multiline Maven plugin repositories in the format `repository-id:repository-url:snapshots-enabled`. Can be used independently of `mvn-repositories`. | |
+| `mvn-repositories-include-central` | Include Maven Central for dependency and plugin repositories in the generated profile. When `false`, Central is disabled for both types unless that type explicitly declares `central`. Has no effect when neither repository list is configured. | `true` |
+| `mvn-repositories-prioritize-central` | Place Maven Central before custom dependency and plugin repositories. Has no effect when Central is excluded or neither repository list is configured. | `true` |
 | `settings-path` | Directory where `settings.xml` is written. | `~/.m2` |
 | `overwrite-settings` | Overwrite an existing `settings.xml`. | `true` |
 | `gpg-private-key` | GPG private key to import into an isolated temporary keyring. | |
@@ -233,7 +235,7 @@ Additional distribution notes:
 | --- | --- |
 | Major version | `8`, `11`, `17`, `21`, `25` |
 | Specific feature or patch version | `11.0`, `11.0.4`, `17.0`, `8.0.282+8` |
-| JEP 322 multi-field versions | `11.0.9.1`, `18.0.1.1` |
+| JEP 322 multi-field versions | `11.0.9.1`, `18.0.1.1`, `26.0.2.1+1` |
 | Early access | `15-ea`, `15.0.0-ea`, `27-ea` |
 | Latest stable GA release | `latest` |
 
@@ -481,10 +483,20 @@ steps:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-For dependencies hosted outside Maven Central, use `mvn-repositories` to add
-resolution repositories to an active profile in the generated `settings.xml`.
-Repository IDs can match `mvn-server-credentials` IDs when authentication is
-required. See [Resolving Maven dependencies from custom repositories](docs/advanced-usage.md#resolving-maven-dependencies-from-custom-repositories).
+For dependencies hosted outside Maven Central, use `mvn-repositories`; for build
+plugins, use `mvn-plugin-repositories`. Either input adds its own repository type
+to the same active profile in the generated `settings.xml`. Repository IDs can
+match `mvn-server-credentials` IDs when authentication is required.
+See [Resolving Maven dependencies from custom repositories](docs/advanced-usage.md#resolving-maven-dependencies-from-custom-repositories)
+and [Resolving Maven plugins from custom repositories](docs/advanced-usage.md#resolving-maven-plugins-from-custom-repositories).
+
+> [!WARNING]
+> `mvn-repositories-include-central: false` now disables inherited Maven Central
+> for **both dependencies and plugins**, even in existing workflows that only
+> configure `mvn-repositories`. Builds relying on uncached plugins from Central
+> must configure `mvn-plugin-repositories` with an accessible plugin repository
+> or explicitly declare `central` there. Neither repository list configured
+> means the Central controls remain inactive.
 
 ### GPG signing
 

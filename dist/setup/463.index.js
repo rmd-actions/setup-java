@@ -109,7 +109,7 @@ class TemurinDistribution extends base_installer/* JavaBase */.O {
             const formattedVersion = this.stable
                 ? item.version_data.semver
                 : item.version_data.semver.replace('-beta+', '+');
-            return {
+            const release = {
                 version: formattedVersion,
                 url: item.binaries[0].package.link,
                 signatureUrl: item.binaries[0].package.signature_link,
@@ -119,15 +119,29 @@ class TemurinDistribution extends base_installer/* JavaBase */.O {
                     source: item.binaries[0].package.checksum_link
                 }
             };
+            return {
+                release,
+                openjdkVersion: getOpenJdkSemverVersion(item.version_data)
+            };
         });
+        // The Adoptium API `semver` folds the JEP 322 patch field into the build
+        // number ('26.0.2.1+1' -> '26.0.2+101') and appends extra metadata for LTS
+        // releases ('25.0.4+7' -> '25.0.4+7.0.LTS'). Exact versions requested by
+        // users follow the OpenJDK notation instead, so also match them against a
+        // key derived from the OpenJDK version fields ('26.0.2+1.1', '25.0.4+7').
+        const isExactBuildRequest = (semver_default().parse(version)?.build.length ?? 0) > 0;
         const satisfiedVersions = availableVersionsWithBinaries
-            .filter(item => (0,util/* isVersionSatisfies */.y)(version, item.version))
+            .filter(({ release, openjdkVersion }) => (0,util/* isVersionSatisfies */.y)(version, release.version) ||
+            (isExactBuildRequest &&
+                openjdkVersion !== null &&
+                semver_default().compareBuild(version, openjdkVersion) === 0))
+            .map(({ release }) => release)
             .sort((a, b) => {
             return -semver_default().compareBuild(a.version, b.version);
         });
         const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
         if (!resolvedFullVersion) {
-            const availableVersionStrings = availableVersionsWithBinaries.map(item => item.version);
+            const availableVersionStrings = availableVersionsWithBinaries.map(({ release }) => release.version);
             throw this.createVersionNotFoundError(version, availableVersionStrings);
         }
         return resolvedFullVersion;
@@ -279,6 +293,20 @@ class TemurinDistribution extends base_installer/* JavaBase */.O {
         return architecture === 'armv7' ? 'arm' : architecture;
     }
 }
+/**
+ * Builds a SemVer version from the OpenJDK version fields reported by the
+ * Adoptium API, e.g. '26.0.2.1+1' -> '26.0.2+1.1' and '25.0.4+7-LTS' ->
+ * '25.0.4+7'. Returns null if the fields cannot form a valid SemVer version.
+ */
+function getOpenJdkSemverVersion(versionData) {
+    const { major, minor, security, patch, build } = versionData;
+    if (build === undefined || build === null) {
+        return null;
+    }
+    const buildMetadata = patch ? `${patch}.${build}` : `${build}`;
+    const version = `${major}.${minor}.${security}+${buildMetadata}`;
+    return semver_default().valid(version) ? version : null;
+}
 
 
 /***/ }),
@@ -375,13 +403,16 @@ async function removeGpgHome(gpgHome) {
     if (!fs__WEBPACK_IMPORTED_MODULE_0__.existsSync(resolvedGpgHome)) {
         return;
     }
+    await stopGpgAgent(resolvedGpgHome);
+    await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(resolvedGpgHome);
+}
+async function stopGpgAgent(gpgHome) {
     try {
-        await _actions_exec__WEBPACK_IMPORTED_MODULE_4__/* .exec */ .m('gpgconf', ['--homedir', toGpgPath(resolvedGpgHome), '--kill', 'gpg-agent'], { silent: true, ignoreReturnCode: true });
+        await _actions_exec__WEBPACK_IMPORTED_MODULE_4__/* .exec */ .m('gpgconf', ['--homedir', toGpgPath(gpgHome), '--kill', 'gpg-agent'], { silent: true, ignoreReturnCode: true });
     }
     catch {
         // gpgconf may be unavailable, but directory removal must still be attempted.
     }
-    await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(resolvedGpgHome);
 }
 async function verifyPackageSignature(archivePath, signatureUrl, publicKeyContent) {
     const signaturePath = await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .downloadTool */ .bq(signatureUrl);
@@ -427,6 +458,7 @@ async function verifyPackageSignature(archivePath, signatureUrl, publicKeyConten
         ], options);
     }
     finally {
+        await stopGpgAgent(gpgHome);
         await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(signaturePath);
         await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(gpgHome);
     }
