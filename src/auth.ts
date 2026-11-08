@@ -13,6 +13,7 @@ export interface MavenServerCredentials {
   id: string;
   usernameEnvVar: string;
   passwordEnvVar: string;
+  repositoryOrigins?: string[];
 }
 
 export interface MavenRepository {
@@ -24,13 +25,25 @@ export interface MavenRepository {
 
 export interface MavenRepositorySettings {
   repositories: MavenRepository[];
+  pluginRepositories?: MavenRepository[];
   includeCentral: boolean;
   prioritizeCentral: boolean;
 }
 
+export interface MavenMirror {
+  id: string;
+  url: string;
+  mirrorOf: string;
+}
+
+const MAVEN_REPOSITORY_ORIGIN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@]+\/?$/;
+
 export async function configureAuthentication() {
   const servers = getMavenServerSettings();
   const repositorySettings = getMavenRepositorySettings();
+  const mirrors = parseMavenMirrors(
+    core.getMultilineInput(constants.INPUT_MVN_MIRRORS)
+  );
   const settingsDirectory =
     core.getInput(constants.INPUT_SETTINGS_PATH) ||
     path.join(os.homedir(), constants.M2_DIR);
@@ -56,7 +69,8 @@ export async function configureAuthentication() {
     settingsDirectory,
     overwriteSettings,
     gpgPassphraseEnvVar,
-    repositorySettings
+    repositorySettings,
+    mirrors
   );
 
   if (gpgPrivateKey) {
@@ -95,25 +109,28 @@ export function getMavenServerSettings(): MavenServerCredentials[] {
     constants.INPUT_MVN_SERVER_CREDENTIALS
   );
 
-  if (entries.some(entry => entry.trim())) {
-    return parseMavenServerCredentials(entries);
-  }
+  const servers = entries.some(entry => entry.trim())
+    ? parseMavenServerCredentials(entries)
+    : [
+        {
+          id: core.getInput(constants.INPUT_SERVER_ID),
+          usernameEnvVar: getInputWithDeprecatedAlias(
+            constants.INPUT_SERVER_USERNAME_ENV_VAR,
+            constants.INPUT_SERVER_USERNAME_DEPRECATED,
+            constants.INPUT_DEFAULT_SERVER_USERNAME
+          ),
+          passwordEnvVar: getInputWithDeprecatedAlias(
+            constants.INPUT_SERVER_PASSWORD_ENV_VAR,
+            constants.INPUT_SERVER_PASSWORD_DEPRECATED,
+            constants.INPUT_DEFAULT_SERVER_PASSWORD
+          )
+        }
+      ];
 
-  return [
-    {
-      id: core.getInput(constants.INPUT_SERVER_ID),
-      usernameEnvVar: getInputWithDeprecatedAlias(
-        constants.INPUT_SERVER_USERNAME_ENV_VAR,
-        constants.INPUT_SERVER_USERNAME_DEPRECATED,
-        constants.INPUT_DEFAULT_SERVER_USERNAME
-      ),
-      passwordEnvVar: getInputWithDeprecatedAlias(
-        constants.INPUT_SERVER_PASSWORD_ENV_VAR,
-        constants.INPUT_SERVER_PASSWORD_DEPRECATED,
-        constants.INPUT_DEFAULT_SERVER_PASSWORD
-      )
-    }
-  ];
+  return addMavenServerRepositoryOrigins(
+    servers,
+    core.getMultilineInput(constants.INPUT_MVN_SERVER_REPOSITORY_ORIGINS)
+  );
 }
 
 // only exported for testing purposes
@@ -157,10 +174,95 @@ export function parseMavenServerCredentials(
 }
 
 // only exported for testing purposes
+export function addMavenServerRepositoryOrigins(
+  servers: MavenServerCredentials[],
+  entries: string[]
+): MavenServerCredentials[] {
+  const serverIds = new Set(servers.map(server => server.id));
+  const originsByServer = new Map<string, string[]>();
+
+  entries.forEach((entry, index) => {
+    if (!entry.trim()) {
+      return;
+    }
+
+    const separator = entry.indexOf(':');
+    if (separator <= 0 || separator === entry.length - 1) {
+      throw new Error(
+        `Invalid mvn-server-repository-origins entry at line ${index + 1}. Expected format: server-id:repository-origin`
+      );
+    }
+
+    const id = entry.slice(0, separator).trim();
+    const value = entry.slice(separator + 1).trim();
+    if (!id || !value) {
+      throw new Error(
+        `Invalid mvn-server-repository-origins entry at line ${index + 1}. Server ID and repository origin are required`
+      );
+    }
+    if (!serverIds.has(id)) {
+      throw new Error(
+        `Unknown server-id '${id}' in mvn-server-repository-origins at line ${index + 1}`
+      );
+    }
+
+    let url: URL;
+    try {
+      if (!MAVEN_REPOSITORY_ORIGIN.test(value)) {
+        throw new Error();
+      }
+      url = new URL(value);
+    } catch {
+      throw new Error(
+        `Invalid repository origin '${value}' in mvn-server-repository-origins at line ${index + 1}`
+      );
+    }
+    if (
+      !url.host ||
+      url.username ||
+      url.password ||
+      (url.pathname !== '' && url.pathname !== '/') ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error(
+        `Invalid repository origin '${value}' in mvn-server-repository-origins at line ${index + 1}`
+      );
+    }
+
+    const explicitPort = /:(\d+)\/?$/.exec(value)?.[1];
+    const port = explicitPort ? Number.parseInt(explicitPort, 10) : undefined;
+    const includePort =
+      port !== undefined &&
+      !(
+        (url.protocol === 'http:' && port === 80) ||
+        (url.protocol === 'https:' && port === 443)
+      );
+    const origin = `${url.protocol}//${url.hostname}${includePort ? `:${port}` : ''}`;
+    const origins = originsByServer.get(id) || [];
+    if (!origins.includes(origin)) {
+      origins.push(origin);
+      originsByServer.set(id, origins);
+    }
+  });
+
+  return servers.map(server => {
+    const repositoryOrigins = originsByServer.get(server.id);
+    return repositoryOrigins ? {...server, repositoryOrigins} : server;
+  });
+}
+
+// only exported for testing purposes
 export function getMavenRepositorySettings():
   MavenRepositorySettings | undefined {
   const entries = core.getMultilineInput(constants.INPUT_MVN_REPOSITORIES);
-  if (!entries.some(entry => entry.trim())) {
+  const pluginEntries = core.getMultilineInput(
+    constants.INPUT_MVN_PLUGIN_REPOSITORIES
+  );
+  if (
+    !entries.some(entry => entry.trim()) &&
+    !pluginEntries.some(entry => entry.trim())
+  ) {
     return undefined;
   }
 
@@ -170,6 +272,11 @@ export function getMavenRepositorySettings():
   );
   return {
     repositories: parseMavenRepositories(entries, includeCentral),
+    pluginRepositories: parseMavenRepositories(
+      pluginEntries,
+      includeCentral,
+      constants.INPUT_MVN_PLUGIN_REPOSITORIES
+    ),
     includeCentral,
     prioritizeCentral: getBooleanInput(
       constants.INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL,
@@ -181,7 +288,8 @@ export function getMavenRepositorySettings():
 // only exported for testing purposes
 export function parseMavenRepositories(
   entries: string[],
-  includeCentral: boolean
+  includeCentral: boolean,
+  inputName = constants.INPUT_MVN_REPOSITORIES
 ): MavenRepository[] {
   const repositories: MavenRepository[] = [];
   const repositoryIds = new Set<string>();
@@ -195,7 +303,7 @@ export function parseMavenRepositories(
     const lastSeparator = entry.lastIndexOf(':');
     if (firstSeparator <= 0 || lastSeparator <= firstSeparator) {
       throw new Error(
-        `Invalid mvn-repositories entry at line ${index + 1}. Expected format: repository-id:repository-url:snapshots-enabled`
+        `Invalid ${inputName} entry at line ${index + 1}. Expected format: repository-id:repository-url:snapshots-enabled`
       );
     }
 
@@ -207,18 +315,16 @@ export function parseMavenRepositories(
       .toLowerCase();
     if (!id || !url || !snapshotsValue) {
       throw new Error(
-        `Invalid mvn-repositories entry at line ${index + 1}. repository-id, repository URL, and snapshots-enabled are required`
+        `Invalid ${inputName} entry at line ${index + 1}. repository-id, repository URL, and snapshots-enabled are required`
       );
     }
     if (snapshotsValue !== 'true' && snapshotsValue !== 'false') {
       throw new Error(
-        `Invalid snapshots-enabled value '${snapshotsValue}' in mvn-repositories entry at line ${index + 1}. Expected true or false`
+        `Invalid snapshots-enabled value '${snapshotsValue}' in ${inputName} entry at line ${index + 1}. Expected true or false`
       );
     }
     if (repositoryIds.has(id)) {
-      throw new Error(
-        `Duplicate repository-id '${id}' in mvn-repositories input`
-      );
+      throw new Error(`Duplicate repository-id '${id}' in ${inputName} input`);
     }
     if (includeCentral && id === constants.MAVEN_CENTRAL_REPOSITORY_ID) {
       throw new Error(
@@ -237,12 +343,112 @@ export function parseMavenRepositories(
   return repositories;
 }
 
+// only exported for testing purposes
+export function parseMavenMirrors(entries: string[]): MavenMirror[] {
+  const mirrors: MavenMirror[] = [];
+  const mirrorIds = new Set<string>();
+
+  entries.forEach((entry, index) => {
+    if (!entry.trim()) {
+      return;
+    }
+
+    const separator = entry.indexOf(':');
+    const remainder = entry.slice(separator + 1).trim();
+    // Protect scheme/authority colons (including IPv6 and ports) before
+    // finding the selector, which may itself contain external:http:*.
+    const urlPrefix =
+      /^[A-Za-z][A-Za-z0-9+.-]*:(?:\/\/(?:[^/?#@\s]*@)?(?:\[[^\]]+\]|[^:/?#\s]+)(?::\d+(?=[/?#:\s]|$))?)?/.exec(
+        remainder
+      )?.[0] ?? '';
+    const fields =
+      /^(.*?):((?:\s*!?external:(?:http:)?\*\s*|[^:,]*)(?:,(?:\s*!?external:(?:http:)?\*\s*|[^:,]*))*)$/.exec(
+        remainder.slice(urlPrefix.length)
+      );
+    if (separator < 0 || !fields) {
+      throw new Error(
+        `Invalid mvn-mirrors entry at line ${index + 1}. Expected format: mirror-id:mirror-url:mirror-of`
+      );
+    }
+
+    const id = entry.slice(0, separator).trim();
+    const url = `${urlPrefix}${fields[1]}`.trim();
+    const mirrorOf = fields[2].trim();
+    if (!id || !url || !mirrorOf) {
+      throw new Error(
+        `Invalid mvn-mirrors entry at line ${index + 1}. mirror-id, mirror URL, and mirror-of are required`
+      );
+    }
+    if (mirrorIds.has(id)) {
+      throw new Error(
+        `Duplicate mirror-id '${id}' in mvn-mirrors input at line ${index + 1}`
+      );
+    }
+
+    mirrorIds.add(id);
+    mirrors.push({id, url, mirrorOf});
+  });
+
+  return mirrors;
+}
+
+function generateRepositorySection(
+  customRepositories: MavenRepository[],
+  settings: MavenRepositorySettings,
+  element: 'repository' | 'pluginRepository'
+): string[] {
+  if (!customRepositories.length && settings.includeCentral) {
+    return [];
+  }
+
+  const centralRepository: MavenRepository = {
+    id: constants.MAVEN_CENTRAL_REPOSITORY_ID,
+    url: constants.MAVEN_CENTRAL_REPOSITORY_URL,
+    snapshotsEnabled: false
+  };
+  const customCentralConfigured = customRepositories.some(
+    repository => repository.id === constants.MAVEN_CENTRAL_REPOSITORY_ID
+  );
+  const repositories = settings.includeCentral
+    ? settings.prioritizeCentral
+      ? [centralRepository, ...customRepositories]
+      : [...customRepositories, centralRepository]
+    : customCentralConfigured
+      ? customRepositories
+      : [...customRepositories, {...centralRepository, releasesEnabled: false}];
+  const container =
+    element === 'repository' ? 'repositories' : 'pluginRepositories';
+  const lines = [`      <${container}>`];
+
+  for (const repository of repositories) {
+    lines.push(
+      `        <${element}>`,
+      `          <id>${escapeXmlText(repository.id)}</id>`,
+      `          <url>${escapeXmlText(repository.url)}</url>`,
+      ...(repository.releasesEnabled === undefined
+        ? []
+        : [
+            '          <releases>',
+            `            <enabled>${repository.releasesEnabled}</enabled>`,
+            '          </releases>'
+          ]),
+      '          <snapshots>',
+      `            <enabled>${repository.snapshotsEnabled}</enabled>`,
+      '          </snapshots>',
+      `        </${element}>`
+    );
+  }
+  lines.push(`      </${container}>`);
+  return lines;
+}
+
 export async function createAuthenticationSettings(
   servers: MavenServerCredentials[],
   settingsDirectory: string,
   overwriteSettings: boolean,
   gpgPassphraseEnvVar: string | undefined = undefined,
-  repositorySettings: MavenRepositorySettings | undefined = undefined
+  repositorySettings: MavenRepositorySettings | undefined = undefined,
+  mirrors: MavenMirror[] = []
 ) {
   core.info(
     `Creating ${constants.MVN_SETTINGS_FILE} with server-id: ${servers.map(server => server.id).join(', ')}`
@@ -252,7 +458,7 @@ export async function createAuthenticationSettings(
   await io.mkdirP(settingsDirectory);
   await write(
     settingsDirectory,
-    generate(servers, gpgPassphraseEnvVar, repositorySettings),
+    generate(servers, gpgPassphraseEnvVar, repositorySettings, mirrors),
     overwriteSettings
   );
 }
@@ -261,7 +467,8 @@ export async function createAuthenticationSettings(
 export function generate(
   servers: MavenServerCredentials[],
   gpgPassphraseEnvVar?: string | undefined,
-  repositorySettings?: MavenRepositorySettings | undefined
+  repositorySettings?: MavenRepositorySettings | undefined,
+  mirrors: MavenMirror[] = []
 ) {
   // The maven-gpg-plugin reads the passphrase from the environment variable
   // named by the `gpg.passphraseEnvName` property (default MAVEN_GPG_PASSPHRASE).
@@ -286,58 +493,53 @@ export function generate(
       '    <server>',
       `      <id>${escapeXmlText(server.id)}</id>`,
       `      <username>${escapeXmlText(`\${env.${server.usernameEnvVar}}`)}</username>`,
-      `      <password>${escapeXmlText(`\${env.${server.passwordEnvVar}}`)}</password>`,
-      '    </server>'
+      `      <password>${escapeXmlText(`\${env.${server.passwordEnvVar}}`)}</password>`
     );
+    if (server.repositoryOrigins) {
+      lines.push('      <repositoryOrigins>');
+      for (const origin of server.repositoryOrigins) {
+        lines.push(
+          `        <repositoryOrigin>${escapeXmlText(origin)}</repositoryOrigin>`
+        );
+      }
+      lines.push('      </repositoryOrigins>');
+    }
+    lines.push('    </server>');
   }
   lines.push('  </servers>');
+
+  if (mirrors.length) {
+    lines.push('  <mirrors>');
+    for (const mirror of mirrors) {
+      lines.push(
+        '    <mirror>',
+        `      <id>${escapeXmlText(mirror.id)}</id>`,
+        `      <url>${escapeXmlText(mirror.url)}</url>`,
+        `      <mirrorOf>${escapeXmlText(mirror.mirrorOf)}</mirrorOf>`,
+        '    </mirror>'
+      );
+    }
+    lines.push('  </mirrors>');
+  }
 
   if (repositorySettings || includeGpgPassphraseProfile) {
     lines.push('  <profiles>');
     if (repositorySettings) {
-      const centralRepository: MavenRepository = {
-        id: constants.MAVEN_CENTRAL_REPOSITORY_ID,
-        url: constants.MAVEN_CENTRAL_REPOSITORY_URL,
-        snapshotsEnabled: false
-      };
-      const customCentralConfigured = repositorySettings.repositories.some(
-        repository => repository.id === constants.MAVEN_CENTRAL_REPOSITORY_ID
-      );
-      const repositories = repositorySettings.includeCentral
-        ? repositorySettings.prioritizeCentral
-          ? [centralRepository, ...repositorySettings.repositories]
-          : [...repositorySettings.repositories, centralRepository]
-        : customCentralConfigured
-          ? repositorySettings.repositories
-          : [
-              ...repositorySettings.repositories,
-              {...centralRepository, releasesEnabled: false}
-            ];
-
       lines.push(
         '    <profile>',
         `      <id>${constants.MAVEN_REPOSITORIES_PROFILE_ID}</id>`,
-        '      <repositories>'
+        ...generateRepositorySection(
+          repositorySettings.repositories,
+          repositorySettings,
+          'repository'
+        ),
+        ...generateRepositorySection(
+          repositorySettings.pluginRepositories ?? [],
+          repositorySettings,
+          'pluginRepository'
+        ),
+        '    </profile>'
       );
-      for (const repository of repositories) {
-        lines.push(
-          '        <repository>',
-          `          <id>${escapeXmlText(repository.id)}</id>`,
-          `          <url>${escapeXmlText(repository.url)}</url>`,
-          ...(repository.releasesEnabled === undefined
-            ? []
-            : [
-                '          <releases>',
-                `            <enabled>${repository.releasesEnabled}</enabled>`,
-                '          </releases>'
-              ]),
-          '          <snapshots>',
-          `            <enabled>${repository.snapshotsEnabled}</enabled>`,
-          '          </snapshots>',
-          '        </repository>'
-        );
-      }
-      lines.push('      </repositories>', '    </profile>');
     }
     if (includeGpgPassphraseProfile) {
       lines.push(

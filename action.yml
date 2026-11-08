@@ -66,15 +66,24 @@ inputs:
   mvn-server-credentials:
     description: 'Multiline list of Maven server credentials in the format `server-id:USERNAME_ENV:PASSWORD_ENV`. When set, replaces the single server configured by server-id, server-username-env-var, and server-password-env-var.'
     required: false
+  mvn-server-repository-origins:
+    description: 'Multiline list of Maven credential origins in the format `server-id:repository-origin`. Each origin must belong to a configured server ID. Requires Maven 3.10+.'
+    required: false
   mvn-repositories:
     description: 'Multiline list of Maven dependency repositories in the format `repository-id:repository-url:snapshots-enabled`.'
     required: false
+  mvn-plugin-repositories:
+    description: 'Multiline list of Maven plugin repositories in the format `repository-id:repository-url:snapshots-enabled`.'
+    required: false
+  mvn-mirrors:
+    description: 'Multiline list of Maven mirrors in the format `mirror-id:mirror-url:mirror-of`. The URL must include a scheme; percent-encode colons in its path, query, or fragment. Use a matching server ID for authentication. Can be used independently of repository inputs.'
+    required: false
   mvn-repositories-include-central:
-    description: 'Include Maven Central in the generated dependency repositories profile. When false, Central is disabled unless an explicit repository with ID `central` is declared.'
+    description: 'Include Maven Central for dependency and plugin repositories in the generated profile. When false, Central is disabled for both types unless that type explicitly declares ID `central`. Has no effect when neither repository list is configured.'
     required: false
     default: true
   mvn-repositories-prioritize-central:
-    description: 'Place Maven Central before custom dependency repositories. Has no effect when Maven Central is excluded.'
+    description: 'Place Maven Central before custom dependency and plugin repositories. Has no effect when Maven Central is excluded or neither repository list is configured.'
     required: false
     default: true
   settings-path:

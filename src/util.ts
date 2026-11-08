@@ -397,6 +397,18 @@ export function getVersionFromFileContent(
   const tentativeVersion = avoidOldNotation(capturedVersion);
   const rawVersion = tentativeVersion.split('-')[0];
 
+  // Preserve Corretto's full vendor release before generic coercion drops its extra numeric fields.
+  if (
+    (extractedDistribution || distributionName) === 'corretto' &&
+    capturedVersion === tentativeVersion &&
+    isExactCorrettoVersion(tentativeVersion)
+  ) {
+    return {
+      version: tentativeVersion,
+      distribution: extractedDistribution
+    };
+  }
+
   let version = semver.validRange(rawVersion)
     ? tentativeVersion
     : semver.coerce(tentativeVersion);
@@ -500,6 +512,13 @@ function avoidOldNotation(content: string): string {
   return content.startsWith('1.') ? content.substring(2) : content;
 }
 
+export function isExactCorrettoVersion(version: string): boolean {
+  // Java 8 releases have a nonzero update field; later releases use five numeric fields.
+  return /^(?:8\.(?!0+(?:\.|$))\d+(?:\.\d+){2}|(?!8\.)\d+(?:\.\d+){4})$/.test(
+    version.replace('+', '.')
+  );
+}
+
 export function convertVersionToSemver(version: number[] | string) {
   // Some distributions may use semver-like notation (12.10.2.1, 12.10.2.1.1)
   const versionArray = Array.isArray(version) ? version : version.split('.');
@@ -508,6 +527,21 @@ export function convertVersionToSemver(version: number[] | string) {
     return `${mainVersion}+${versionArray.slice(3).join('.')}`;
   }
   return mainVersion;
+}
+
+/**
+ * Java versions (JEP 322) can contain more numeric fields than SemVer allows,
+ * e.g. '11.0.9.1' or Temurin respins such as '26.0.2.1+1'. Move the extra
+ * fields into SemVer build metadata ('11.0.9+1', '26.0.2+1.1'). Any other
+ * input (ranges, regular SemVer versions) is returned unchanged.
+ */
+export function normalizeJavaVersionToSemver(version: string): string {
+  const match = /^(\d+(?:\.\d+){3,})(?:\+([0-9A-Za-z.-]+))?$/.exec(version);
+  if (!match) {
+    return version;
+  }
+  const converted = convertVersionToSemver(match[1]);
+  return match[2] ? `${converted}.${match[2]}` : converted;
 }
 
 /**

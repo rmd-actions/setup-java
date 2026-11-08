@@ -28,6 +28,7 @@
 - [Testing against different platforms](#Testing-against-different-platforms)
 - [Publishing using Apache Maven](#Publishing-using-Apache-Maven)
 - [Publishing to multiple Maven servers](#publishing-to-multiple-maven-servers)
+- [Redirecting Maven repositories with mirrors](#redirecting-maven-repositories-with-mirrors)
 - [Apache Maven with a settings path](#apache-maven-with-a-settings-path)
 - [Maven transfer progress (download logs)](#Maven-transfer-progress-download-logs)
 - [Java problem matcher (compiler annotations)](#java-problem-matcher-compiler-annotations)
@@ -82,6 +83,12 @@ steps:
 ```
 
 ### Liberica
+
+Exact patch releases use SDKMAN's `X.Y.Z+P.B` notation, including in `.sdkmanrc`.
+For example, `java=17.0.20+1.1-librca` selects BellSoft's `17.0.20.1+1` release.
+Alternatively, `java-version: '17.0.20.1'` selects the newest build of patch 1,
+whereas `java-version: '17.0.20+1'` selects the exact unpatched build 1.
+Floating versions such as `17` prefer newer patches before comparing build numbers.
 
 ```yaml
 steps:
@@ -151,7 +158,16 @@ steps:
 ```
 
 ### Amazon Corretto
-**NOTE:** Amazon Corretto only supports the major version specification.
+Amazon Corretto supports major versions (for example, `25`) and full release numbers
+(for example, `25.0.5.0.10`). Full release numbers select the versioned archive directly,
+including older releases no longer listed in the latest-version feed. SHA-256 checksums
+for exact releases come from Amazon's current download catalog or GitHub release notes.
+Historical releases without a published SHA-256 cannot be downloaded.
+
+Full Corretto release numbers supplied through `java-version-file` now select that exact
+release; previously they selected the latest matching major. Update MD5-only file pins
+to a release with a published SHA-256. Partial version-file values keep their existing
+major-version behavior.
 
 ```yaml
 steps:
@@ -159,7 +175,7 @@ steps:
   - uses: actions/setup-java@v6
     with:
       distribution: 'corretto'
-      java-version: '25'
+      java-version: '25.0.5.0.10'
   - run: java --version
 ```
 
@@ -330,7 +346,7 @@ The package types have these meanings:
 | `liberica-nik` | `jdk`, `jdk+fx` | `java-version` selects the embedded JDK version, not the NIK/GraalVM release number. BellSoft currently publishes matching standard and JavaFX "full" bundles for JDK 11 and later, with gaps between feature releases. Any other `java-package` value is rejected. |
 | `microsoft` | `jdk` | Stable builds only. The bundled manifest contains Java 11, 16, 17, 21, and 25 releases; platform availability varies by release. |
 | `semeru` | `jdk`, `jre` | Stable OpenJ9 builds only. IBM publishes both image types for the supported release lines (currently 8, 11, 17, 21, and 25), subject to platform availability. |
-| `corretto` | `jdk`, `jre` | Accepts major versions only. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
+| `corretto` | `jdk`, `jre` | Accepts major versions and full Corretto release numbers. JDK availability follows Amazon's platform catalog. For the operating systems directly selected by `setup-java`, JRE downloads are limited to Java 8 on Windows; Linux and macOS use `jdk`. |
 | `oracle` | `jdk` | Stable Oracle JDK 17 and later only. |
 | `oracle-openjdk` | `jdk` | Installs the GA or early-access JDK builds currently listed or archived on `jdk.java.net`; use a `-ea` version such as `27-ea` for early access. |
 | `redhat` | `jdk`, `jre` | Stable builds only. Version availability follows the Foojay Disco catalog for Red Hat Build of OpenJDK and can lag Red Hat's downloads page. |
@@ -885,6 +901,11 @@ Use `mvn-server-credentials` to add more than one credential entry to the genera
 
 When this input is set, it replaces the single server configured by `server-id`, `server-username-env-var`, and `server-password-env-var`.
 
+Use `mvn-server-repository-origins` when a Maven server credential must be allowed for an explicit repository origin. Each line has the format `server-id:repository-origin`; a server can have multiple origins.
+
+> [!NOTE]
+> `mvn-server-repository-origins` only works with Maven 3.10 and later. Earlier Maven versions ignore the generated `repositoryOrigins` element and log an `Unrecognised tag: 'repositoryOrigins'` warning. GitHub-hosted runners currently ship Maven 3.9.x, so use the [Maven Wrapper](https://maven.apache.org/tools/wrapper/) or install Maven 3.10+ yourself to use this feature.
+
 ```yaml
 steps:
   - uses: actions/checkout@v7
@@ -896,6 +917,9 @@ steps:
       mvn-server-credentials: |
         releases:RELEASES_USERNAME:RELEASES_PASSWORD
         snapshots:SNAPSHOTS_USERNAME:SNAPSHOTS_PASSWORD
+      mvn-server-repository-origins: |
+        releases:https://central.sonatype.com
+        snapshots:https://central.sonatype.com
   - name: Publish with Maven
     run: mvn deploy
     env:
@@ -913,11 +937,17 @@ This configuration produces the following server entries:
     <id>releases</id>
     <username>${env.RELEASES_USERNAME}</username>
     <password>${env.RELEASES_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
   <server>
     <id>snapshots</id>
     <username>${env.SNAPSHOTS_USERNAME}</username>
     <password>${env.SNAPSHOTS_PASSWORD}</password>
+    <repositoryOrigins>
+      <repositoryOrigin>https://central.sonatype.com</repositoryOrigin>
+    </repositoryOrigins>
   </server>
 </servers>
 ```
@@ -989,14 +1019,162 @@ This configuration adds the following active profile to `settings.xml`:
 </activeProfiles>
 ```
 
-Maven Central is included first by default. Set
-`mvn-repositories-prioritize-central: false` to place custom repositories
-first, or set `mvn-repositories-include-central: false` to disable Central. The
-generated profile overrides the Central repository inherited from Maven's Super
-POM with releases and snapshots disabled. When automatic Central inclusion is
-off, the ID `central` may instead be declared explicitly in `mvn-repositories`
-to replace it with a user-specified repository; otherwise that ID is reserved
-to prevent duplicate entries.
+Maven Central is included first by default. The Central controls apply to both
+dependency and plugin repositories. Set
+`mvn-repositories-prioritize-central: false` to place custom repositories first
+within each configured list, or set `mvn-repositories-include-central: false` to
+disable Central for both types. The generated profile overrides the dependency
+and plugin Central repositories inherited from Maven's Super POM with releases
+and snapshots disabled, even if only one custom repository list is supplied.
+These controls have no effect when neither list contains a nonblank entry.
+
+When automatic Central inclusion is off, the ID `central` may instead be
+declared explicitly in `mvn-repositories` or `mvn-plugin-repositories` to replace
+it with a user-specified repository for that type. Declaring it in one list
+does not enable Central in the other. Otherwise that ID is reserved to prevent
+duplicate entries. Other repositories declared in your project's POM are not
+disabled by these controls.
+
+### Resolving Maven plugins from custom repositories
+
+Maven resolves build plugins through `<pluginRepositories>`, separately from
+dependency `<repositories>`. Use `mvn-plugin-repositories` to configure plugin
+resolution with the same multiline `repository-id:repository-url:snapshots-enabled`
+format. It can be supplied without `mvn-repositories`; dependency repositories
+are not automatically used as plugin repositories.
+
+For example, configure the same private repository for dependencies and plugins
+and disable inherited Maven Central for both:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        private:PRIVATE_REPOSITORY_USERNAME:PRIVATE_REPOSITORY_TOKEN
+      mvn-repositories: |
+        private:https://maven.example.com/releases:false
+      mvn-plugin-repositories: |
+        private:https://maven.example.com/releases:false
+      mvn-repositories-include-central: false
+  - run: mvn --batch-mode verify
+    env:
+      PRIVATE_REPOSITORY_USERNAME: ${{ secrets.PRIVATE_REPOSITORY_USERNAME }}
+      PRIVATE_REPOSITORY_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+```
+
+The matching ID `private` selects the same server credentials for both types.
+IDs must be unique within each list, but can be shared across the two lists.
+Public repositories do not require a matching credential entry.
+
+Alongside dependency repositories, the active `setup-java-repositories` profile
+contains:
+
+```xml
+<pluginRepositories>
+  <pluginRepository>
+    <id>private</id>
+    <url>https://maven.example.com/releases</url>
+    <snapshots>
+      <enabled>false</enabled>
+    </snapshots>
+  </pluginRepository>
+  <pluginRepository>
+    <id>central</id>
+    <url>https://repo.maven.apache.org/maven2</url>
+    <releases>
+      <enabled>false</enabled>
+    </releases>
+    <snapshots>
+      <enabled>false</enabled>
+    </snapshots>
+  </pluginRepository>
+</pluginRepositories>
+```
+
+Omitting a Central override would leave the Super POM's plugin repository
+enabled. In particular, `mvn-repositories-include-central: false` now disables
+inherited plugin Central even for existing workflows that only configure
+`mvn-repositories`. To download plugins in such workflows, configure a plugin
+repository or explicitly declare `central` in `mvn-plugin-repositories`.
+
+With Central included, it is placed before custom plugin repositories by
+default; `mvn-repositories-prioritize-central: false` places it after them.
+All repository generation respects `settings-path` and `overwrite-settings`;
+an existing settings file is left untouched when `overwrite-settings: false`.
+
+### Redirecting Maven repositories with mirrors
+
+Use `mvn-mirrors` to redirect matching dependency and plugin repositories,
+including Maven Central and repositories declared in project or parent POMs.
+Unlike repository profiles, mirrors replace the destination Maven contacts.
+The Central controls described above do not redirect arbitrary POM repositories.
+
+Each nonblank line has the format `mirror-id:mirror-url:mirror-of`. IDs must be
+unique within this input. `mirror-url` must be an absolute URL that includes a
+scheme, such as `https://`. URL schemes, ports, IPv6 addresses, and colons in
+`mirrorOf` selectors are preserved. An explicit `mirror-of` field is required
+after the complete URL, including any port. Percent-encode colons in the URL
+path, query, or fragment as `%3A`. Otherwise, text after the last unencoded
+colon may be read as the `mirror-of` value. For example:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: actions/setup-java@v6
+    with:
+      distribution: 'temurin'
+      java-version: '21'
+      mvn-server-credentials: |
+        private:PRIVATE_REPOSITORY_USERNAME:PRIVATE_REPOSITORY_TOKEN
+      mvn-mirrors: |
+        private:https://maven.example.com/releases:*
+  - run: mvn --batch-mode verify
+    env:
+      PRIVATE_REPOSITORY_USERNAME: ${{ secrets.PRIVATE_REPOSITORY_USERNAME }}
+      PRIVATE_REPOSITORY_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+```
+
+This adds the following directly under `<settings>`, not inside a profile:
+
+```xml
+<mirrors>
+  <mirror>
+    <id>private</id>
+    <url>https://maven.example.com/releases</url>
+    <mirrorOf>*</mirrorOf>
+  </mirror>
+</mirrors>
+```
+
+For authentication, the mirror ID must match a server ID configured through
+`mvn-server-credentials` or the single-server inputs. Public mirrors do not need
+matching credentials. Credentials remain environment-variable references in the
+generated settings; do not put credential values in `mvn-mirrors`.
+
+Mirrors can be used alone, as above, or alongside `mvn-repositories` and
+`mvn-plugin-repositories`. They do not change those inputs or the Central
+controls. Omitting `mvn-mirrors`, or supplying only blank lines, adds no
+`<mirrors>` section or repository profile.
+
+Maven interprets `mirrorOf`: `*` matches every repository, `central` matches
+only that repository ID, `external:*` matches external repositories, and
+`external:http:*` matches external HTTP repositories. Comma-separated patterns
+such as `external:*,!internal` exclude specific IDs. Selector text and mirror
+order are retained; Maven applies its own matching and precedence rules.
+For example, a public mirror needs no additional repository or credential input:
+
+```yaml
+mvn-mirrors: |
+  public:https://mirror.example.com:8443/maven:external:*,!internal
+```
+
+Mirror generation respects `settings-path` and `overwrite-settings`. An existing
+settings file is left untouched when `overwrite-settings: false`; this input
+does not merge mirrors into that file.
 
 ### GPG
 
