@@ -7,12 +7,14 @@ export const modules = {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   addMavenServerRepositoryOrigins: () => (/* binding */ addMavenServerRepositoryOrigins),
 /* harmony export */   configureAuthentication: () => (/* binding */ configureAuthentication),
 /* harmony export */   createAuthenticationSettings: () => (/* binding */ createAuthenticationSettings),
 /* harmony export */   generate: () => (/* binding */ generate),
 /* harmony export */   getInputWithDeprecatedAlias: () => (/* binding */ getInputWithDeprecatedAlias),
 /* harmony export */   getMavenRepositorySettings: () => (/* binding */ getMavenRepositorySettings),
 /* harmony export */   getMavenServerSettings: () => (/* binding */ getMavenServerSettings),
+/* harmony export */   parseMavenMirrors: () => (/* binding */ parseMavenMirrors),
 /* harmony export */   parseMavenRepositories: () => (/* binding */ parseMavenRepositories),
 /* harmony export */   parseMavenServerCredentials: () => (/* binding */ parseMavenServerCredentials)
 /* harmony export */ });
@@ -37,9 +39,11 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
+const MAVEN_REPOSITORY_ORIGIN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@]+\/?$/;
 async function configureAuthentication() {
     const servers = getMavenServerSettings();
     const repositorySettings = getMavenRepositorySettings();
+    const mirrors = parseMavenMirrors(_actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getMultilineInput */ .q3(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_MIRRORS */ .K));
     const settingsDirectory = _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getInput */ .V4(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SETTINGS_PATH */ .Xh) ||
         path__WEBPACK_IMPORTED_MODULE_0__.join(os__WEBPACK_IMPORTED_MODULE_4__.homedir(), _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .M2_DIR */ .iT);
     const overwriteSettings = (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .getBooleanInput */ .Vt)(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_OVERWRITE_SETTINGS */ .TS, true);
@@ -49,7 +53,7 @@ async function configureAuthentication() {
     if (gpgPrivateKey) {
         _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .setSecret */ .Pq(gpgPrivateKey);
     }
-    await createAuthenticationSettings(servers, settingsDirectory, overwriteSettings, gpgPassphraseEnvVar, repositorySettings);
+    await createAuthenticationSettings(servers, settingsDirectory, overwriteSettings, gpgPassphraseEnvVar, repositorySettings, mirrors);
     if (gpgPrivateKey) {
         _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .info */ .pq('Importing private gpg key');
         const gpgHome = await _gpg_js__WEBPACK_IMPORTED_MODULE_5__/* .importKey */ .Fh(gpgPrivateKey);
@@ -74,16 +78,16 @@ function getInputWithDeprecatedAlias(inputName, deprecatedInputName, defaultValu
 // only exported for testing purposes
 function getMavenServerSettings() {
     const entries = _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getMultilineInput */ .q3(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_SERVER_CREDENTIALS */ .MM);
-    if (entries.some(entry => entry.trim())) {
-        return parseMavenServerCredentials(entries);
-    }
-    return [
-        {
-            id: _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getInput */ .V4(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_ID */ .fd),
-            usernameEnvVar: getInputWithDeprecatedAlias(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_USERNAME_ENV_VAR */ .sc, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_USERNAME_DEPRECATED */ .sp, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_DEFAULT_SERVER_USERNAME */ .Wj),
-            passwordEnvVar: getInputWithDeprecatedAlias(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_PASSWORD_ENV_VAR */ .r4, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_PASSWORD_DEPRECATED */ .Vt, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_DEFAULT_SERVER_PASSWORD */ .xp)
-        }
-    ];
+    const servers = entries.some(entry => entry.trim())
+        ? parseMavenServerCredentials(entries)
+        : [
+            {
+                id: _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getInput */ .V4(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_ID */ .fd),
+                usernameEnvVar: getInputWithDeprecatedAlias(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_USERNAME_ENV_VAR */ .sc, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_USERNAME_DEPRECATED */ .sp, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_DEFAULT_SERVER_USERNAME */ .Wj),
+                passwordEnvVar: getInputWithDeprecatedAlias(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_PASSWORD_ENV_VAR */ .r4, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_SERVER_PASSWORD_DEPRECATED */ .Vt, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_DEFAULT_SERVER_PASSWORD */ .xp)
+            }
+        ];
+    return addMavenServerRepositoryOrigins(servers, _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getMultilineInput */ .q3(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_SERVER_REPOSITORY_ORIGINS */ .Pt));
 }
 // only exported for testing purposes
 function parseMavenServerCredentials(entries) {
@@ -110,20 +114,78 @@ function parseMavenServerCredentials(entries) {
     return servers;
 }
 // only exported for testing purposes
+function addMavenServerRepositoryOrigins(servers, entries) {
+    const serverIds = new Set(servers.map(server => server.id));
+    const originsByServer = new Map();
+    entries.forEach((entry, index) => {
+        if (!entry.trim()) {
+            return;
+        }
+        const separator = entry.indexOf(':');
+        if (separator <= 0 || separator === entry.length - 1) {
+            throw new Error(`Invalid mvn-server-repository-origins entry at line ${index + 1}. Expected format: server-id:repository-origin`);
+        }
+        const id = entry.slice(0, separator).trim();
+        const value = entry.slice(separator + 1).trim();
+        if (!id || !value) {
+            throw new Error(`Invalid mvn-server-repository-origins entry at line ${index + 1}. Server ID and repository origin are required`);
+        }
+        if (!serverIds.has(id)) {
+            throw new Error(`Unknown server-id '${id}' in mvn-server-repository-origins at line ${index + 1}`);
+        }
+        let url;
+        try {
+            if (!MAVEN_REPOSITORY_ORIGIN.test(value)) {
+                throw new Error();
+            }
+            url = new URL(value);
+        }
+        catch {
+            throw new Error(`Invalid repository origin '${value}' in mvn-server-repository-origins at line ${index + 1}`);
+        }
+        if (!url.host ||
+            url.username ||
+            url.password ||
+            (url.pathname !== '' && url.pathname !== '/') ||
+            url.search ||
+            url.hash) {
+            throw new Error(`Invalid repository origin '${value}' in mvn-server-repository-origins at line ${index + 1}`);
+        }
+        const explicitPort = /:(\d+)\/?$/.exec(value)?.[1];
+        const port = explicitPort ? Number.parseInt(explicitPort, 10) : undefined;
+        const includePort = port !== undefined &&
+            !((url.protocol === 'http:' && port === 80) ||
+                (url.protocol === 'https:' && port === 443));
+        const origin = `${url.protocol}//${url.hostname}${includePort ? `:${port}` : ''}`;
+        const origins = originsByServer.get(id) || [];
+        if (!origins.includes(origin)) {
+            origins.push(origin);
+            originsByServer.set(id, origins);
+        }
+    });
+    return servers.map(server => {
+        const repositoryOrigins = originsByServer.get(server.id);
+        return repositoryOrigins ? { ...server, repositoryOrigins } : server;
+    });
+}
+// only exported for testing purposes
 function getMavenRepositorySettings() {
     const entries = _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getMultilineInput */ .q3(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_REPOSITORIES */ .W2);
-    if (!entries.some(entry => entry.trim())) {
+    const pluginEntries = _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .getMultilineInput */ .q3(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_PLUGIN_REPOSITORIES */ .gR);
+    if (!entries.some(entry => entry.trim()) &&
+        !pluginEntries.some(entry => entry.trim())) {
         return undefined;
     }
     const includeCentral = (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .getBooleanInput */ .Vt)(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL */ .H5, true);
     return {
         repositories: parseMavenRepositories(entries, includeCentral),
+        pluginRepositories: parseMavenRepositories(pluginEntries, includeCentral, _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_PLUGIN_REPOSITORIES */ .gR),
         includeCentral,
         prioritizeCentral: (0,_util_js__WEBPACK_IMPORTED_MODULE_6__/* .getBooleanInput */ .Vt)(_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_REPOSITORIES_PRIORITIZE_CENTRAL */ .OT, true)
     };
 }
 // only exported for testing purposes
-function parseMavenRepositories(entries, includeCentral) {
+function parseMavenRepositories(entries, includeCentral, inputName = _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_REPOSITORIES */ .W2) {
     const repositories = [];
     const repositoryIds = new Set();
     entries.forEach((entry, index) => {
@@ -133,7 +195,7 @@ function parseMavenRepositories(entries, includeCentral) {
         const firstSeparator = entry.indexOf(':');
         const lastSeparator = entry.lastIndexOf(':');
         if (firstSeparator <= 0 || lastSeparator <= firstSeparator) {
-            throw new Error(`Invalid mvn-repositories entry at line ${index + 1}. Expected format: repository-id:repository-url:snapshots-enabled`);
+            throw new Error(`Invalid ${inputName} entry at line ${index + 1}. Expected format: repository-id:repository-url:snapshots-enabled`);
         }
         const id = entry.slice(0, firstSeparator).trim();
         const url = entry.slice(firstSeparator + 1, lastSeparator).trim();
@@ -142,13 +204,13 @@ function parseMavenRepositories(entries, includeCentral) {
             .trim()
             .toLowerCase();
         if (!id || !url || !snapshotsValue) {
-            throw new Error(`Invalid mvn-repositories entry at line ${index + 1}. repository-id, repository URL, and snapshots-enabled are required`);
+            throw new Error(`Invalid ${inputName} entry at line ${index + 1}. repository-id, repository URL, and snapshots-enabled are required`);
         }
         if (snapshotsValue !== 'true' && snapshotsValue !== 'false') {
-            throw new Error(`Invalid snapshots-enabled value '${snapshotsValue}' in mvn-repositories entry at line ${index + 1}. Expected true or false`);
+            throw new Error(`Invalid snapshots-enabled value '${snapshotsValue}' in ${inputName} entry at line ${index + 1}. Expected true or false`);
         }
         if (repositoryIds.has(id)) {
-            throw new Error(`Duplicate repository-id '${id}' in mvn-repositories input`);
+            throw new Error(`Duplicate repository-id '${id}' in ${inputName} input`);
         }
         if (includeCentral && id === _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg) {
             throw new Error(`Repository-id '${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg}' is reserved when ${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .INPUT_MVN_REPOSITORIES_INCLUDE_CENTRAL */ .H5} is enabled`);
@@ -162,15 +224,77 @@ function parseMavenRepositories(entries, includeCentral) {
     });
     return repositories;
 }
-async function createAuthenticationSettings(servers, settingsDirectory, overwriteSettings, gpgPassphraseEnvVar = undefined, repositorySettings = undefined) {
+// only exported for testing purposes
+function parseMavenMirrors(entries) {
+    const mirrors = [];
+    const mirrorIds = new Set();
+    entries.forEach((entry, index) => {
+        if (!entry.trim()) {
+            return;
+        }
+        const separator = entry.indexOf(':');
+        const remainder = entry.slice(separator + 1).trim();
+        // Protect scheme/authority colons (including IPv6 and ports) before
+        // finding the selector, which may itself contain external:http:*.
+        const urlPrefix = /^[A-Za-z][A-Za-z0-9+.-]*:(?:\/\/(?:[^/?#@\s]*@)?(?:\[[^\]]+\]|[^:/?#\s]+)(?::\d+(?=[/?#:\s]|$))?)?/.exec(remainder)?.[0] ?? '';
+        const fields = /^(.*?):((?:\s*!?external:(?:http:)?\*\s*|[^:,]*)(?:,(?:\s*!?external:(?:http:)?\*\s*|[^:,]*))*)$/.exec(remainder.slice(urlPrefix.length));
+        if (separator < 0 || !fields) {
+            throw new Error(`Invalid mvn-mirrors entry at line ${index + 1}. Expected format: mirror-id:mirror-url:mirror-of`);
+        }
+        const id = entry.slice(0, separator).trim();
+        const url = `${urlPrefix}${fields[1]}`.trim();
+        const mirrorOf = fields[2].trim();
+        if (!id || !url || !mirrorOf) {
+            throw new Error(`Invalid mvn-mirrors entry at line ${index + 1}. mirror-id, mirror URL, and mirror-of are required`);
+        }
+        if (mirrorIds.has(id)) {
+            throw new Error(`Duplicate mirror-id '${id}' in mvn-mirrors input at line ${index + 1}`);
+        }
+        mirrorIds.add(id);
+        mirrors.push({ id, url, mirrorOf });
+    });
+    return mirrors;
+}
+function generateRepositorySection(customRepositories, settings, element) {
+    if (!customRepositories.length && settings.includeCentral) {
+        return [];
+    }
+    const centralRepository = {
+        id: _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg,
+        url: _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_URL */ .jv,
+        snapshotsEnabled: false
+    };
+    const customCentralConfigured = customRepositories.some(repository => repository.id === _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg);
+    const repositories = settings.includeCentral
+        ? settings.prioritizeCentral
+            ? [centralRepository, ...customRepositories]
+            : [...customRepositories, centralRepository]
+        : customCentralConfigured
+            ? customRepositories
+            : [...customRepositories, { ...centralRepository, releasesEnabled: false }];
+    const container = element === 'repository' ? 'repositories' : 'pluginRepositories';
+    const lines = [`      <${container}>`];
+    for (const repository of repositories) {
+        lines.push(`        <${element}>`, `          <id>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(repository.id)}</id>`, `          <url>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(repository.url)}</url>`, ...(repository.releasesEnabled === undefined
+            ? []
+            : [
+                '          <releases>',
+                `            <enabled>${repository.releasesEnabled}</enabled>`,
+                '          </releases>'
+            ]), '          <snapshots>', `            <enabled>${repository.snapshotsEnabled}</enabled>`, '          </snapshots>', `        </${element}>`);
+    }
+    lines.push(`      </${container}>`);
+    return lines;
+}
+async function createAuthenticationSettings(servers, settingsDirectory, overwriteSettings, gpgPassphraseEnvVar = undefined, repositorySettings = undefined, mirrors = []) {
     _actions_core__WEBPACK_IMPORTED_MODULE_1__/* .info */ .pq(`Creating ${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MVN_SETTINGS_FILE */ .vO} with server-id: ${servers.map(server => server.id).join(', ')}`);
     // when an alternate m2 location is specified use only that location (no .m2 directory)
     // otherwise use the home/.m2/ path
     await _actions_io__WEBPACK_IMPORTED_MODULE_2__/* .mkdirP */ .U$(settingsDirectory);
-    await write(settingsDirectory, generate(servers, gpgPassphraseEnvVar, repositorySettings), overwriteSettings);
+    await write(settingsDirectory, generate(servers, gpgPassphraseEnvVar, repositorySettings, mirrors), overwriteSettings);
 }
 // only exported for testing purposes
-function generate(servers, gpgPassphraseEnvVar, repositorySettings) {
+function generate(servers, gpgPassphraseEnvVar, repositorySettings, mirrors = []) {
     // The maven-gpg-plugin reads the passphrase from the environment variable
     // named by the `gpg.passphraseEnvName` property (default MAVEN_GPG_PASSPHRASE).
     // Only configure it when the requested env var name differs from that default;
@@ -187,39 +311,28 @@ function generate(servers, gpgPassphraseEnvVar, repositorySettings) {
         '  <servers>'
     ];
     for (const server of servers) {
-        lines.push('    <server>', `      <id>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(server.id)}</id>`, `      <username>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(`\${env.${server.usernameEnvVar}}`)}</username>`, `      <password>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(`\${env.${server.passwordEnvVar}}`)}</password>`, '    </server>');
+        lines.push('    <server>', `      <id>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(server.id)}</id>`, `      <username>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(`\${env.${server.usernameEnvVar}}`)}</username>`, `      <password>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(`\${env.${server.passwordEnvVar}}`)}</password>`);
+        if (server.repositoryOrigins) {
+            lines.push('      <repositoryOrigins>');
+            for (const origin of server.repositoryOrigins) {
+                lines.push(`        <repositoryOrigin>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(origin)}</repositoryOrigin>`);
+            }
+            lines.push('      </repositoryOrigins>');
+        }
+        lines.push('    </server>');
     }
     lines.push('  </servers>');
+    if (mirrors.length) {
+        lines.push('  <mirrors>');
+        for (const mirror of mirrors) {
+            lines.push('    <mirror>', `      <id>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(mirror.id)}</id>`, `      <url>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(mirror.url)}</url>`, `      <mirrorOf>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(mirror.mirrorOf)}</mirrorOf>`, '    </mirror>');
+        }
+        lines.push('  </mirrors>');
+    }
     if (repositorySettings || includeGpgPassphraseProfile) {
         lines.push('  <profiles>');
         if (repositorySettings) {
-            const centralRepository = {
-                id: _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg,
-                url: _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_URL */ .jv,
-                snapshotsEnabled: false
-            };
-            const customCentralConfigured = repositorySettings.repositories.some(repository => repository.id === _constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_CENTRAL_REPOSITORY_ID */ .xg);
-            const repositories = repositorySettings.includeCentral
-                ? repositorySettings.prioritizeCentral
-                    ? [centralRepository, ...repositorySettings.repositories]
-                    : [...repositorySettings.repositories, centralRepository]
-                : customCentralConfigured
-                    ? repositorySettings.repositories
-                    : [
-                        ...repositorySettings.repositories,
-                        { ...centralRepository, releasesEnabled: false }
-                    ];
-            lines.push('    <profile>', `      <id>${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_REPOSITORIES_PROFILE_ID */ .hq}</id>`, '      <repositories>');
-            for (const repository of repositories) {
-                lines.push('        <repository>', `          <id>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(repository.id)}</id>`, `          <url>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(repository.url)}</url>`, ...(repository.releasesEnabled === undefined
-                    ? []
-                    : [
-                        '          <releases>',
-                        `            <enabled>${repository.releasesEnabled}</enabled>`,
-                        '          </releases>'
-                    ]), '          <snapshots>', `            <enabled>${repository.snapshotsEnabled}</enabled>`, '          </snapshots>', '        </repository>');
-            }
-            lines.push('      </repositories>', '    </profile>');
+            lines.push('    <profile>', `      <id>${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .MAVEN_REPOSITORIES_PROFILE_ID */ .hq}</id>`, ...generateRepositorySection(repositorySettings.repositories, repositorySettings, 'repository'), ...generateRepositorySection(repositorySettings.pluginRepositories ?? [], repositorySettings, 'pluginRepository'), '    </profile>');
         }
         if (includeGpgPassphraseProfile) {
             lines.push('    <profile>', `      <id>${_constants_js__WEBPACK_IMPORTED_MODULE_7__/* .GPG_PASSPHRASE_PROFILE_ID */ .K$}</id>`, '      <properties>', `        <gpg.passphraseEnvName>${(0,_xml_js__WEBPACK_IMPORTED_MODULE_8__/* .escapeXmlText */ .I)(gpgPassphraseEnvVar)}</gpg.passphraseEnvName>`, '      </properties>', '    </profile>');
@@ -350,13 +463,16 @@ async function removeGpgHome(gpgHome) {
     if (!fs__WEBPACK_IMPORTED_MODULE_0__.existsSync(resolvedGpgHome)) {
         return;
     }
+    await stopGpgAgent(resolvedGpgHome);
+    await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(resolvedGpgHome);
+}
+async function stopGpgAgent(gpgHome) {
     try {
-        await _actions_exec__WEBPACK_IMPORTED_MODULE_4__/* .exec */ .m('gpgconf', ['--homedir', toGpgPath(resolvedGpgHome), '--kill', 'gpg-agent'], { silent: true, ignoreReturnCode: true });
+        await _actions_exec__WEBPACK_IMPORTED_MODULE_4__/* .exec */ .m('gpgconf', ['--homedir', toGpgPath(gpgHome), '--kill', 'gpg-agent'], { silent: true, ignoreReturnCode: true });
     }
     catch {
         // gpgconf may be unavailable, but directory removal must still be attempted.
     }
-    await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(resolvedGpgHome);
 }
 async function verifyPackageSignature(archivePath, signatureUrl, publicKeyContent) {
     const signaturePath = await _actions_tool_cache__WEBPACK_IMPORTED_MODULE_5__/* .downloadTool */ .bq(signatureUrl);
@@ -402,6 +518,7 @@ async function verifyPackageSignature(archivePath, signatureUrl, publicKeyConten
         ], options);
     }
     finally {
+        await stopGpgAgent(gpgHome);
         await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(signaturePath);
         await _actions_io__WEBPACK_IMPORTED_MODULE_3__/* .rmRF */ .Yz(gpgHome);
     }
